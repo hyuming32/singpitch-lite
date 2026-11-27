@@ -7,6 +7,10 @@ import {
 } from '../../state/errlog';
 import type { MicInputMode, PracticeSettings } from '../../state/settings';
 import { displayNoteName } from '../noteLabel';
+import {
+  useNoiseCalibration,
+  type NoiseGateResult,
+} from './useNoiseCalibration';
 
 export interface PracticeDiagnosticsSnapshot {
   mic: MicDiagnostics;
@@ -30,7 +34,15 @@ interface PracticeSettingsSheetProps {
 
 const DB_MIN = -80;
 const DB_MAX = 0;
-const CALIBRATION_MS = 2000;
+
+const PITCH_COLOR_SWATCHES = [
+  { value: '#e8b400', label: '黃' },
+  { value: '#0047ff', label: '藍' },
+  { value: '#e5383b', label: '紅' },
+  { value: '#1f9d55', label: '綠' },
+  { value: '#8b3dff', label: '紫' },
+  { value: '#222222', label: '黑' },
+] as const;
 
 function dbToPercent(db: number): number {
   const clamped = Math.max(DB_MIN, Math.min(DB_MAX, db));
@@ -78,7 +90,6 @@ export function PracticeSettingsSheet({
   getDiagnostics,
   onClose,
 }: PracticeSettingsSheetProps) {
-  const [calibrating, setCalibrating] = useState(false);
   const [calibMsg, setCalibMsg] = useState<{
     text: string;
     isError: boolean;
@@ -92,16 +103,28 @@ export function PracticeSettingsSheet({
   );
   const [copyMsg, setCopyMsg] = useState<string | null>(null);
 
-  const samplesRef = useRef<number[]>([]);
-  const timerRef = useRef<number | null>(null);
   const copyTimerRef = useRef<number | null>(null);
-  const calibratingRef = useRef(false);
 
-  useEffect(() => {
-    if (calibratingRef.current && liveDb !== null && Number.isFinite(liveDb)) {
-      samplesRef.current.push(liveDb);
-    }
-  }, [liveDb]);
+  const { calibrating, startCalibration } = useNoiseCalibration({
+    liveDb,
+    onComplete: (result: NoiseGateResult) => {
+      if (!result.ok) {
+        setCalibMsg({
+          text:
+            result.reason === 'empty'
+              ? '未收到麥克風音量資料，請稍後再試'
+              : '環境太吵（建議門檻超過 −30 dB），未變更設定',
+          isError: true,
+        });
+        return;
+      }
+      onUpdateSettings({ noiseGateDb: result.gateDb, noiseCalibrated: true });
+      setCalibMsg({
+        text: `已設定噪音門檻為 ${result.gateDb} dB`,
+        isError: false,
+      });
+    },
+  });
 
   useEffect(() => {
     if (!open || !diagOpen) {
@@ -118,15 +141,10 @@ export function PracticeSettingsSheet({
 
   useEffect(() => {
     return () => {
-      if (timerRef.current !== null) {
-        window.clearTimeout(timerRef.current);
-        timerRef.current = null;
-      }
       if (copyTimerRef.current !== null) {
         window.clearTimeout(copyTimerRef.current);
         copyTimerRef.current = null;
       }
-      calibratingRef.current = false;
     };
   }, []);
 
@@ -135,7 +153,7 @@ export function PracticeSettingsSheet({
   }
 
   async function handleCalibrateNoise() {
-    if (calibratingRef.current) return;
+    if (calibrating) return;
     setCalibMsg(null);
 
     if (!micActive) {
@@ -149,51 +167,7 @@ export function PracticeSettingsSheet({
       }
     }
 
-    samplesRef.current = [];
-    calibratingRef.current = true;
-    setCalibrating(true);
-
-    if (timerRef.current !== null) {
-      window.clearTimeout(timerRef.current);
-    }
-
-    timerRef.current = window.setTimeout(() => {
-      timerRef.current = null;
-      calibratingRef.current = false;
-      setCalibrating(false);
-
-      const collected = samplesRef.current;
-      if (collected.length === 0) {
-        setCalibMsg({
-          text: '未收到麥克風音量資料，請稍後再試',
-          isError: true,
-        });
-        return;
-      }
-
-      const sorted = [...collected].sort((a, b) => a - b);
-      const idx = Math.min(
-        sorted.length - 1,
-        Math.floor(sorted.length * 0.95),
-      );
-      const p95 = sorted[idx]!;
-      const nextGate = Math.round(p95 + 6);
-
-      if (nextGate > -30) {
-        setCalibMsg({
-          text: '環境太吵（建議門檻超過 −30 dB），未變更設定',
-          isError: true,
-        });
-        return;
-      }
-
-      const clampedGate = Math.max(-80, Math.min(-30, nextGate));
-      onUpdateSettings({ noiseGateDb: clampedGate });
-      setCalibMsg({
-        text: `已設定噪音門檻為 ${clampedGate} dB`,
-        isError: false,
-      });
-    }, CALIBRATION_MS);
+    startCalibration();
   }
 
   function handleClearErrors() {
@@ -484,6 +458,49 @@ export function PracticeSettingsSheet({
                 ＋
               </button>
             </div>
+          </div>
+
+          {/* 7.5 音高線顏色 */}
+          <div className="setting-row setting-row-stack">
+            <span className="setting-label">音高線顏色</span>
+            {(
+              [
+                {
+                  key: 'staffPitchColor',
+                  label: '五線譜音高線',
+                  current: settings.staffPitchColor,
+                },
+                {
+                  key: 'pianoNeedleColor',
+                  label: '鋼琴定位線',
+                  current: settings.pianoNeedleColor,
+                },
+              ] as const
+            ).map((row) => (
+              <div key={row.key} className="pitch-color-row">
+                <span className="pitch-color-label">{row.label}</span>
+                <div className="pitch-color-swatches" role="radiogroup" aria-label={row.label}>
+                  {PITCH_COLOR_SWATCHES.map((swatch) => {
+                    const selected =
+                      row.current.toLowerCase() === swatch.value.toLowerCase();
+                    return (
+                      <button
+                        key={swatch.value}
+                        type="button"
+                        role="radio"
+                        aria-checked={selected}
+                        aria-label={`${row.label} ${swatch.label}`}
+                        className={`pitch-color-swatch ${selected ? 'is-selected' : ''}`}
+                        style={{ backgroundColor: swatch.value }}
+                        onClick={() =>
+                          onUpdateSettings({ [row.key]: swatch.value })
+                        }
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
 
           {/* 8. 診斷資訊（可折疊） */}

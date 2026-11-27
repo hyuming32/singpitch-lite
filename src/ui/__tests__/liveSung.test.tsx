@@ -29,7 +29,7 @@ describe('沒播放時的即時黃線會畫在五線譜上', () => {
 
     const now = 50;
     const samples = Array.from({ length: 40 }, (_, i) => ({ wall: now - 1 + i * 0.025, midi: 60 }));
-    const span = freeSpan(win.start, win.end, 0)!;
+    const span = freeSpan(win.start, win.end)!;
     const live = freeSungPoints(samples, now, span);
     expect(live.length).toBeGreaterThan(30);
     expect(Math.max(...live.map((p) => p.t))).toBeCloseTo(win.end, 1);

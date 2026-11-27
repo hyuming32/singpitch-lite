@@ -132,6 +132,21 @@ describe('settings', () => {
     saveSettings(custom, storage);
     expect(loadSettings(storage)).toEqual(custom);
   });
+
+  it('cadence 預設為 leading，且舊值 double 與 true 皆相容轉為 leading', () => {
+    expect(DEFAULT_SETTINGS.cadence).toBe('leading');
+    expect(sanitizeSettings({ cadence: 'double' }).cadence).toBe('leading');
+    expect(sanitizeSettings({ cadence: true }).cadence).toBe('leading');
+    expect(sanitizeSettings({ cadence: false }).cadence).toBe('off');
+    expect(sanitizeSettings({ cadence: 'direct' }).cadence).toBe('direct');
+    expect(sanitizeSettings({ cadence: 'leading' }).cadence).toBe('leading');
+    expect(sanitizeSettings({ cadence: 'single' }).cadence).toBe('single');
+
+    const storage = createMemoryStorage({
+      [SETTINGS_STORAGE_KEY]: JSON.stringify({ cadence: 'double' }),
+    });
+    expect(loadSettings(storage).cadence).toBe('leading');
+  });
 });
 
 describe('toExerciseOptions 與摘要', () => {
@@ -512,5 +527,45 @@ describe('載入設定與選取修正超出音域的起始音', () => {
     });
     const loaded = loadSettings(storage);
     expect(loaded.startTonic).toBe(60);
+  });
+});
+
+describe('噪音校正狀態與音高線顏色設定', () => {
+  it('預設值與舊存檔缺欄位時使用預設值', () => {
+    expect(DEFAULT_SETTINGS.noiseCalibrated).toBe(false);
+    expect(DEFAULT_SETTINGS.staffPitchColor).toBe('#e8b400');
+    expect(DEFAULT_SETTINGS.pianoNeedleColor).toBe('#0047ff');
+
+    const oldLoaded = sanitizeSettings({ bpm: 100 });
+    expect(oldLoaded.noiseCalibrated).toBe(false);
+    expect(oldLoaded.staffPitchColor).toBe('#e8b400');
+    expect(oldLoaded.pianoNeedleColor).toBe('#0047ff');
+  });
+
+  it('noiseCalibrated 非布林時退回 false；合法 #rrggbb 保留、亂填回預設', () => {
+    const valid = sanitizeSettings({
+      noiseCalibrated: true,
+      staffPitchColor: '#e5383b',
+      pianoNeedleColor: '#1F9D55',
+    });
+    expect(valid.noiseCalibrated).toBe(true);
+    expect(valid.staffPitchColor).toBe('#e5383b');
+    expect(valid.pianoNeedleColor).toBe('#1F9D55');
+
+    const invalid = sanitizeSettings({
+      noiseCalibrated: 'yes',
+      staffPitchColor: 'red',
+      pianoNeedleColor: '#fff',
+    });
+    expect(invalid.noiseCalibrated).toBe(false);
+    expect(invalid.staffPitchColor).toBe('#e8b400');
+    expect(invalid.pianoNeedleColor).toBe('#0047ff');
+
+    const invalid2 = sanitizeSettings({
+      staffPitchColor: '#zzzzzz',
+      pianoNeedleColor: '123456',
+    });
+    expect(invalid2.staffPitchColor).toBe('#e8b400');
+    expect(invalid2.pianoNeedleColor).toBe('#0047ff');
   });
 });

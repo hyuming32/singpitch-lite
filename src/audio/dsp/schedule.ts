@@ -197,6 +197,8 @@ export function compileExercise(
     let midis: number[];
     if (isPad) {
       midis = voiceChord(chord.pcs);
+    } else if (chord.midis && chord.midis.length > 0) {
+      midis = chord.midis;
     } else {
       midis = voiceCadenceChord(chord.pcs, prevCadenceBass);
       if (midis.length > 0) {

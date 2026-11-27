@@ -1,10 +1,9 @@
 /**
- * 沒有播放時的「即時演唱黃線」：開麥克風就能看到自己唱的音，不必先按播放。
+ * 沒有播放時的「即時演唱音高線」：開麥克風就能看到自己唱的音，不必先按播放。
  *
- * 播放中的黃線依歌曲時間記錄（rawSungRef）；沒播放時沒有歌曲時間，
- * 改以牆上時間收集最近幾秒，畫在目前這一行「播放位置右側的空白處」，
- * 最新的點貼在行尾、往左捲動（跟 Studio 清唱圖一樣由右往左流動），
- * 不會蓋到暫停前已經唱過、記錄在播放位置左側的黃線。
+ * 播放中的音高線依歌曲時間記錄（rawSungRef）；沒播放時沒有歌曲時間，
+ * 改以牆上時間收集最近樣本，使用目前這一行的整個寬度（line.start ～ line.end），
+ * 最新的點貼在行尾、由右往左捲動（1 秒譜面 = 1 秒實際時間）。
  */
 
 export interface FreeSample {
@@ -19,45 +18,46 @@ export interface FreeSungPoint {
   midi: number;
 }
 
-/** 即時黃線最多保留的秒數 */
-export const FREE_WINDOW_SEC = 3;
-/** 播放位置右側空間太小時，至少用這麼長的時間寬度（會往左蓋到一點） */
-export const FREE_MIN_SPAN_SEC = 1.5;
+/** 即時音高線預設保留的秒數（足夠覆蓋整行五線譜） */
+export const FREE_WINDOW_SEC = 30;
+/** 樣本數上限，避免長時間開麥克風時陣列無限成長 */
+export const FREE_MAX_SAMPLES = 3600;
 
-/** 丟掉超過視窗的舊點 */
+/** 丟掉超過視窗的舊點，並限制樣本總數上限 */
 export function pruneFreeSamples(
   samples: FreeSample[],
   nowWall: number,
   windowSec = FREE_WINDOW_SEC,
+  maxSamples = FREE_MAX_SAMPLES,
 ): FreeSample[] {
-  let i = 0;
-  while (i < samples.length && nowWall - samples[i]!.wall > windowSec) i++;
-  return i === 0 ? samples : samples.slice(i);
+  let start = 0;
+  while (start < samples.length && nowWall - samples[start]!.wall > windowSec) {
+    start++;
+  }
+  const minStartForCap = Math.max(0, samples.length - maxSamples);
+  if (minStartForCap > start) {
+    start = minStartForCap;
+  }
+  return start === 0 ? samples : samples.slice(start);
 }
 
 /**
- * 決定即時黃線在這一行的時間範圍 [from, to]（歌曲秒數）。
- * to 固定在行尾；from 從播放位置開始，但寬度介於 FREE_MIN_SPAN_SEC 與 windowSec 之間。
+ * 決定即時音高線在這一行的時間範圍 [from, to]（歌曲秒數）。
+ * 沒播放時使用目前這一行的整個寬度（lineStart ～ lineEnd）。
  */
 export function freeSpan(
   lineStart: number,
   lineEnd: number,
-  cursorSec: number,
-  windowSec = FREE_WINDOW_SEC,
 ): { from: number; to: number } | null {
   const length = lineEnd - lineStart;
   if (!(length > 0)) return null;
-  const to = lineEnd;
-  const cursor = Math.min(Math.max(cursorSec, lineStart), lineEnd);
-  let span = Math.min(to - cursor, windowSec);
-  span = Math.max(span, Math.min(FREE_MIN_SPAN_SEC, length));
-  return { from: to - span, to };
+  return { from: lineStart, to: lineEnd };
 }
 
 /**
  * 把牆上時間的樣本換成這一行的歌曲時間點。
  * 最新的樣本在 to，越舊越往左；超出 [from, to] 的丟掉。
- * 為了讓畫面以固定速度捲動，時間比例縮放成「span 秒的譜面 = span 秒的實際時間」。
+ * 為了讓畫面以固定速度捲動，時間比例維持「1 秒譜面 = 1 秒實際時間」。
  */
 export function freeSungPoints(
   samples: readonly FreeSample[],

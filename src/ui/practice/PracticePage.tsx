@@ -7,7 +7,7 @@ import {
   type KeyBlock,
 } from '../../core/exercise';
 import { type Key } from '../../core/key';
-import { centsBetween, hzToMidi, midiToHz } from '../../core/notes';
+import { hzToMidi, midiToHz } from '../../core/notes';
 import { BUILTIN_PATTERNS } from '../../core/patterns';
 import { staffPosition } from '../../core/staff';
 import { micCtxSecToSongSec } from '../../mic/latency';
@@ -47,7 +47,6 @@ import {
   type PracticeSettings,
 } from '../../state/settings';
 import { useAudioEngine } from '../AudioContext';
-import { CentsBar } from './CentsBar';
 import { JianpuStrip } from './JianpuStrip';
 import { KeyStrip } from './KeyStrip';
 import {
@@ -94,11 +93,16 @@ import {
 } from './PracticeSettingsSheet';
 import { StaffView, type SungPoint } from './StaffView';
 import {
+  FREE_WINDOW_SEC,
   freeSpan,
   freeSungPoints,
   pruneFreeSamples,
   type FreeSample,
 } from './freeSung';
+import {
+  useNoiseCalibration,
+  type NoiseGateResult,
+} from './useNoiseCalibration';
 import {
   canScreenshot,
   downloadScreenshotBlob,
@@ -123,17 +127,7 @@ interface RawSungSample {
   voiced: boolean;
 }
 
-function median3(values: readonly number[]): number | null {
-  if (values.length === 0) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = sorted.length >> 1;
-  if ((sorted.length & 1) === 1) {
-    return sorted[mid]!;
-  }
-  return (sorted[mid - 1]! + sorted[mid]!) * 0.5;
-}
-
-/** 正式練唱畫面：上方 cents 色條、簡譜帶與五線譜，下方對音鋼琴與播放列 */
+/** 正式練唱畫面：上方簡譜帶與五線譜，下方對音鋼琴與播放列 */
 export function PracticePage({
   settings,
   onUpdateSettings,
@@ -162,8 +156,12 @@ export function PracticePage({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [liveDb, setLiveDb] = useState<number | null>(null);
   const [sungMidi, setSungMidi] = useState<number | null>(null);
-  const [currentCents, setCurrentCents] = useState<number | null>(null);
   const [sungVersion, setSungVersion] = useState(0);
+  const [autoCalibBanner, setAutoCalibBanner] = useState<{
+    text: string;
+    tone: 'info' | 'ok' | 'error';
+  } | null>(null);
+  const autoCalibTimerRef = useRef<number | null>(null);
   const [confusionBubbleOpen, setConfusionBubbleOpen] = useState(false);
   const [infLoopCount, setInfLoopCount] = useState(1);
   const [screenshotToast, setScreenshotToast] = useState<{
@@ -177,11 +175,11 @@ export function PracticePage({
   const voiceGateRef = useRef(new VoiceGate());
   const confusionRef = useRef(new ConfusionDetector());
   const rawSungRef = useRef<RawSungSample[]>([]);
-  // 沒播放時的即時演唱（牆上時間）；開麥克風就顯示黃線，不必等播放
+  // 沒播放時的即時演唱音高線（牆上時間）；開麥克風就顯示，不必等播放
   const freeSungRef = useRef<FreeSample[]>([]);
+  const freeLineSpanRef = useRef(FREE_WINDOW_SEC);
   const freeTickRef = useRef(0);
   const [freeVersion, setFreeVersion] = useState(0);
-  const recentVoiceRef = useRef<{ wallMs: number; hz: number }[]>([]);
   const recentDetectedRef = useRef<
     { wallMs: number; hz: number; midi: number }[]
   >([]);
@@ -642,12 +640,10 @@ export function PracticePage({
   // 練習內容變更時清空演唱軌跡與辨識狀態
   useEffect(() => {
     rawSungRef.current = [];
-    recentVoiceRef.current = [];
     voiceGateRef.current.reset();
     confusionRef.current.reset();
     setConfusionBubbleOpen(false);
     setSungMidi(null);
-    setCurrentCents(null);
     setSungVersion((v) => v + 1);
   }, [exercise]);
 
@@ -718,35 +714,13 @@ export function PracticePage({
       const isVoice = gate.label === 'voice' && frame.hz > 0;
       const rawMidi = isVoice ? hzToMidi(frame.hz, cfg.a4) : NaN;
       const shiftSemitones = resolveVoiceDisplay(cfg).pitchShift;
-      const shiftedHz = isVoice
-        ? frame.hz * Math.pow(2, shiftSemitones / 12)
-        : 0;
       const shiftedMidi =
         isVoice && Number.isFinite(rawMidi) ? rawMidi + shiftSemitones : NaN;
 
       if (isVoice && Number.isFinite(shiftedMidi)) {
         setSungMidi(shiftedMidi);
-        const nowMs = performance.now();
-        recentVoiceRef.current.push({ wallMs: nowMs, hz: shiftedHz });
-        recentVoiceRef.current = recentVoiceRef.current
-          .filter((item) => nowMs - item.wallMs <= 250)
-          .slice(-3);
-
-        const target = targetMidiRef.current;
-        if (target !== null) {
-          const centsList = recentVoiceRef.current
-            .map((item) => centsBetween(item.hz, target, cfg.a4))
-            .filter((c) => Number.isFinite(c));
-          setCurrentCents(median3(centsList));
-        } else {
-          setCurrentCents(null);
-        }
       } else {
         setSungMidi(null);
-        setCurrentCents(null);
-        if (gate.label === 'silent' || gate.label === 'leak') {
-          recentVoiceRef.current = [];
-        }
       }
 
       if (!aligned) {
@@ -755,7 +729,11 @@ export function PracticePage({
           wall,
           midi: isVoice && Number.isFinite(shiftedMidi) ? shiftedMidi : NaN,
         });
-        freeSungRef.current = pruneFreeSamples(freeSungRef.current, wall);
+        freeSungRef.current = pruneFreeSamples(
+          freeSungRef.current,
+          wall,
+          Math.max(FREE_WINDOW_SEC, freeLineSpanRef.current),
+        );
         // 畫面更新最多每 40 ms 一次
         if (nowWallMs - freeTickRef.current >= 40) {
           freeTickRef.current = nowWallMs;
@@ -807,7 +785,6 @@ export function PracticePage({
           setMicActive(false);
           setLiveDb(null);
           setSungMidi(null);
-          setCurrentCents(null);
         },
       });
       setMicActive(true);
@@ -833,7 +810,6 @@ export function PracticePage({
     setFreeVersion((v) => v + 1);
     setLiveDb(null);
     setSungMidi(null);
-    setCurrentCents(null);
   }, [micController]);
 
   // 背景切回前景時安全復原音訊與麥克風狀態（不自動重開麥克風，track 已結束則熄燈）
@@ -861,7 +837,6 @@ export function PracticePage({
             setMicActive(false);
             setLiveDb(null);
             setSungMidi(null);
-            setCurrentCents(null);
             await engine.init();
           } else if (ctxState === 'suspended' || ctxState === 'interrupted') {
             engine.pause();
@@ -901,11 +876,84 @@ export function PracticePage({
     };
   }, [engine, micController]);
 
+  const showAutoCalibBanner = useCallback(
+    (
+      banner: { text: string; tone: 'info' | 'ok' | 'error' } | null,
+      autoHideMs?: number,
+    ) => {
+      if (autoCalibTimerRef.current !== null) {
+        window.clearTimeout(autoCalibTimerRef.current);
+        autoCalibTimerRef.current = null;
+      }
+      setAutoCalibBanner(banner);
+      if (banner && autoHideMs !== undefined) {
+        autoCalibTimerRef.current = window.setTimeout(() => {
+          autoCalibTimerRef.current = null;
+          setAutoCalibBanner(null);
+        }, autoHideMs);
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    return () => {
+      if (autoCalibTimerRef.current !== null) {
+        window.clearTimeout(autoCalibTimerRef.current);
+        autoCalibTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  const {
+    calibrating: autoCalibrating,
+    startCalibration: startAutoCalibration,
+    cancelCalibration: cancelAutoCalibration,
+  } = useNoiseCalibration({
+    liveDb,
+    onComplete: (result: NoiseGateResult) => {
+      if (result.ok) {
+        onUpdateSettings({
+          noiseGateDb: result.gateDb,
+          noiseCalibrated: true,
+        });
+        showAutoCalibBanner(
+          { text: `已設定噪音門檻為 ${result.gateDb} dB`, tone: 'ok' },
+          2000,
+        );
+      } else {
+        onUpdateSettings({ noiseCalibrated: true });
+        const reasonText =
+          result.reason === 'empty'
+            ? '未收到麥克風音量資料'
+            : '環境太吵（建議門檻超過 −30 dB）';
+        showAutoCalibBanner(
+          {
+            text: `${reasonText}，可從齒輪 → 校正環境噪音 重新校正`,
+            tone: 'error',
+          },
+          4000,
+        );
+      }
+    },
+  });
+
   async function handleToggleMic() {
     if (micActive) {
+      if (autoCalibrating) {
+        cancelAutoCalibration();
+        showAutoCalibBanner(null);
+      }
       await stopMic();
     } else {
-      await startMic();
+      const ok = await startMic();
+      if (ok && !settingsRef.current.noiseCalibrated) {
+        showAutoCalibBanner({
+          text: '校正環境噪音中，請保持安靜（2 秒）',
+          tone: 'info',
+        });
+        startAutoCalibration();
+      }
     }
   }
 
@@ -1352,8 +1400,17 @@ export function PracticePage({
     });
   }, [lines, sungVersion, settings.a4, pitchShift]);
 
-  // 沒播放時：即時黃線畫在目前這一行播放位置右側，最新的點貼在行尾
+  // 沒播放時：即時演唱音高線使用目前這一行的整個寬度，最新的點貼在行尾
   const liveSungByLine = useMemo(() => {
+    let currentIdx = lines.findIndex((l) => l.isCurrent);
+    if (currentIdx < 0) currentIdx = 0;
+    const currentLine = lines[currentIdx];
+    if (currentLine) {
+      freeLineSpanRef.current = Math.max(
+        FREE_WINDOW_SEC,
+        currentLine.end - currentLine.start,
+      );
+    }
     const samples = freeSungRef.current;
     if (playing || !micActive || samples.length === 0 || lines.length === 0) {
       return lines.map(() => EMPTY_SUNG);
@@ -1368,15 +1425,13 @@ export function PracticePage({
       wall,
       midi: curved.y[i]!,
     }));
-    let currentIdx = lines.findIndex((l) => l.isCurrent);
-    if (currentIdx < 0) currentIdx = 0;
     return lines.map((line, idx) => {
       if (idx !== currentIdx) return EMPTY_SUNG;
-      const span = freeSpan(line.start, line.end, sec);
+      const span = freeSpan(line.start, line.end);
       return span ? freeSungPoints(smooth, nowWall, span) : EMPTY_SUNG;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lines, freeVersion, playing, micActive, sec]);
+  }, [lines, freeVersion, playing, micActive]);
 
   function handleDismissIosHint() {
     markIosInstallHintDismissed();
@@ -1922,11 +1977,15 @@ export function PracticePage({
             </div>
           )}
 
-          <CentsBar
-            cents={currentCents}
-            isTablet={isTablet}
-            height={vpLayout.centsHeight}
-          />
+          {autoCalibBanner && (
+            <div
+              className={`auto-calib-toast is-${autoCalibBanner.tone}`}
+              role="status"
+              aria-live="polite"
+            >
+              {autoCalibBanner.text}
+            </div>
+          )}
 
           <div
             className="sheet-score-area"
@@ -1992,6 +2051,7 @@ export function PracticePage({
                   metrics={item.metrics}
                   sung={sungByLine[lineIdx] ?? EMPTY_SUNG}
                   liveSung={liveSungByLine[lineIdx] ?? EMPTY_SUNG}
+                  pitchColor={settings.staffPitchColor}
                   countIn={
                     item.line.isCurrent
                       ? countIn
@@ -2025,6 +2085,7 @@ export function PracticePage({
           centerMidi={tonicMidi}
           targetMidi={targetMidi}
           sungMidi={sungMidi}
+          needleColor={settings.pianoNeedleColor}
           height={effectivePianoH}
           collapsed={isPianoCollapsed}
           isTablet={isTablet}

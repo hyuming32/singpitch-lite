@@ -1381,7 +1381,7 @@ button:disabled {
 
 /* 1. 標題列 */
 .practice-header {
-  height: 35px;
+  height: 40px;
   width: 100%;
   max-width: 100%;
   min-width: 0;
@@ -1394,19 +1394,19 @@ button:disabled {
 }
 
 .practice-page.is-portrait .practice-header {
-  height: 38px;
+  height: 43px;
   gap: 6px;
 }
 
 .practice-page.is-tablet .practice-header {
-  height: 56px;
+  height: 61px;
   gap: 10px;
 }
 
 .practice-back-btn {
   position: relative;
-  height: 26px;
-  min-width: 26px;
+  height: 31px;
+  min-width: 31px;
   padding: 0 6px;
   border-radius: 6px;
   border: 1px solid var(--border);
@@ -1426,8 +1426,8 @@ button:disabled {
 }
 
 .practice-page.is-tablet .practice-back-btn {
-  height: 40px;
-  min-width: 40px;
+  height: 45px;
+  min-width: 45px;
   font-size: 24px;
   border-radius: 10px;
 }
@@ -1653,7 +1653,7 @@ button:disabled {
 
 .practice-pill-btn {
   position: relative;
-  height: 26px;
+  height: 31px;
   padding: 0 10px;
   border-radius: 999px;
   border: 1px solid var(--border);
@@ -1674,7 +1674,7 @@ button:disabled {
 }
 
 .practice-page.is-tablet .practice-pill-btn {
-  height: 38px;
+  height: 43px;
   padding: 0 14px;
   font-size: 14px;
 }
@@ -1688,7 +1688,7 @@ button:disabled {
 
 .practice-gear-btn {
   position: relative;
-  height: 35px;
+  height: 40px;
   width: 40px;
   border-radius: 999px;
   border: 1px solid var(--border);
@@ -1707,29 +1707,29 @@ button:disabled {
 }
 
 .practice-page.is-portrait .practice-back-btn {
-  height: 34px;
-  min-width: 34px;
+  height: 39px;
+  min-width: 39px;
   font-size: 20px;
   border-radius: 8px;
 }
 
 .practice-page.is-portrait .practice-mic-btn.is-compact {
   flex-shrink: 0;
-  height: 34px;
-  min-width: 38px;
+  height: 39px;
+  min-width: 43px;
   padding: 0 8px;
   gap: 4px;
 }
 
 .practice-page.is-portrait .practice-gear-btn {
-  height: 36px;
-  width: 38px;
+  height: 41px;
+  width: 41px;
   font-size: 16px;
 }
 
 .practice-page.is-tablet .practice-gear-btn {
-  height: 38px;
-  width: 38px;
+  height: 43px;
+  width: 43px;
   font-size: 18px;
 }
 
@@ -1777,91 +1777,6 @@ button:disabled {
   font-size: 12px;
   font-weight: 600;
   z-index: 14;
-}
-
-/* cents 色條 */
-.cents-bar {
-  height: 22px;
-  padding: 1px 14px 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.cents-bar.is-tablet {
-  height: 37px;
-  padding: 4px 20px 0;
-}
-
-.cents-track-wrap {
-  position: relative;
-  height: 6px;
-  display: flex;
-  align-items: center;
-}
-
-.cents-bar.is-tablet .cents-track-wrap {
-  height: 9px;
-}
-
-.cents-track {
-  width: 100%;
-  height: 6px;
-  border-radius: 999px;
-  overflow: hidden;
-  display: flex;
-}
-
-.cents-bar.is-tablet .cents-track {
-  height: 9px;
-}
-
-.cents-seg {
-  display: block;
-  height: 100%;
-}
-
-.cents-seg-red {
-  background-color: #e24b4a;
-}
-
-.cents-seg-orange {
-  background-color: #ef9f27;
-}
-
-.cents-seg-green {
-  background-color: #97c459;
-}
-
-.cents-pointer {
-  position: absolute;
-  top: 50%;
-  width: 4px;
-  height: 12px;
-  border-radius: 2px;
-  background-color: #2c2c2a;
-  transform: translate(-50%, -50%);
-  pointer-events: none;
-}
-
-.cents-bar.is-tablet .cents-pointer {
-  width: 5px;
-  height: 16px;
-}
-
-.cents-labels {
-  display: flex;
-  justify-content: space-between;
-  font-size: 10px;
-  line-height: 1.2;
-  color: #5f5e5a;
-  margin-top: 2px;
-}
-
-.cents-bar.is-tablet .cents-labels {
-  font-size: 12px;
-  margin-top: 4px;
 }
 
 /* 簡譜帶 + 五線譜共用座標容器 */
@@ -2610,12 +2525,12 @@ button:disabled {
    ========================================================================== */
 
 .practice-mic-btn {
-  height: 31px;
+  height: 36px;
   gap: 5px;
 }
 
 .practice-page.is-tablet .practice-mic-btn {
-  height: 38px;
+  height: 43px;
 }
 
 .practice-mic-icon {
@@ -4127,4 +4042,71 @@ button:disabled {
   padding: 3px 8px;
   border-radius: 6px;
   z-index: 22;
+}
+
+/* 首次開啟麥克風自動環境噪音校正提示（畫面中央，不擋住操作） */
+.auto-calib-toast {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 15;
+  pointer-events: none;
+  max-width: min(360px, calc(100% - 32px));
+  padding: 10px 16px;
+  border-radius: 10px;
+  background-color: rgba(25, 29, 36, 0.9);
+  color: #f8fafc;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+  text-align: center;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+}
+
+.auto-calib-toast.is-ok {
+  background-color: rgba(20, 83, 45, 0.94);
+}
+
+.auto-calib-toast.is-error {
+  background-color: rgba(127, 29, 29, 0.94);
+}
+
+/* 練唱設定：音高線顏色色票列 */
+.pitch-color-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  margin-top: 6px;
+}
+
+.pitch-color-label {
+  font-size: 13px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.pitch-color-swatches {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pitch-color-swatch {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  min-height: 32px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  padding: 0;
+  cursor: pointer;
+}
+
+.pitch-color-swatch.is-selected {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
 }

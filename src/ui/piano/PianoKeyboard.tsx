@@ -23,6 +23,8 @@ interface PianoKeyboardProps {
   centerMidi?: number;
   targetMidi: number | null;
   sungMidi: number | null;
+  /** 演唱定位線（needle）顏色（預設 #0047ff） */
+  needleColor?: string;
   height: number;
   collapsed: boolean;
   isTablet: boolean;
@@ -78,6 +80,7 @@ export function PianoKeyboard({
   centerMidi = 60,
   targetMidi,
   sungMidi,
+  needleColor = '#0047ff',
   height,
   collapsed,
   isTablet,
@@ -667,20 +670,35 @@ export function PianoKeyboard({
             );
           })}
 
-          {/* 3. 演唱即時音高黃色指針 */}
+          {/* 3. 演唱即時音高定位線（加白色描邊以利在目標藍鍵上辨識） */}
           {needleX !== null && (
             <g pointerEvents="none">
+              <line
+                x1={needleX}
+                y1={0}
+                x2={needleX}
+                y2={keyAreaHeight}
+                stroke="#ffffff"
+                strokeWidth={5}
+              />
               <polygon
                 points={`${needleX - 5},0 ${needleX + 5},0 ${needleX},7`}
-                fill="#e8b400"
+                fill="#ffffff"
+                stroke="#ffffff"
+                strokeWidth={2}
+                strokeLinejoin="round"
               />
               <line
                 x1={needleX}
                 y1={0}
                 x2={needleX}
                 y2={keyAreaHeight}
-                stroke="#e8b400"
-                strokeWidth={2.5}
+                stroke={needleColor}
+                strokeWidth={3}
+              />
+              <polygon
+                points={`${needleX - 5},0 ${needleX + 5},0 ${needleX},7`}
+                fill={needleColor}
               />
             </g>
           )}

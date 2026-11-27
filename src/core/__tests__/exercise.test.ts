@@ -61,10 +61,11 @@ describe('exercise', () => {
     expect(ex.notes.filter((n) => n.phase === 'listen')).toHaveLength(7);
     expect(ex.notes.filter((n) => n.phase === 'sing')).toHaveLength(7);
     const cadences = ex.chords.filter((c) => c.role === 'cadence');
-    expect(cadences).toHaveLength(2);
-    expect(cadences.map((c) => c.roman)).toEqual(['I', 'V/7']);
-    expect(cadences[0]?.dur).toBeCloseTo(1.0, 6);
+    expect(cadences).toHaveLength(3);
+    expect(cadences.map((c) => c.roman)).toEqual(['I', 'V/7', 'I']);
+    expect(cadences[0]?.dur).toBeCloseTo(0.5, 6);
     expect(cadences[1]?.dur).toBeCloseTo(0.5, 6);
+    expect(cadences[2]?.dur).toBeCloseTo(0.5, 6);
   });
 
   it('throws on out-of-range or invalid bpm', () => {
@@ -216,16 +217,17 @@ describe('exercise', () => {
     expect(numKeys).toBeGreaterThan(2);
 
     const cadenceChords = withCadence.chords.filter((c) => c.role === 'cadence');
-    // 每個調只有 1 組 cadence（2 個和弦：I, V/7），總組數＝調數
+    // 每個調只有 1 組 cadence（第 1 調 3 個和弦、之後每調 4 個和弦），總組數＝調數
     const cadenceKeys = new Set(cadenceChords.map((c) => c.keyIndex));
     expect(cadenceKeys.size).toBe(numKeys);
-    expect(cadenceChords).toHaveLength(numKeys * 2);
+    expect(cadenceChords).toHaveLength(3 + (numKeys - 1) * 4);
 
     // 每個調的 cadence 皆位於該調第 1 遍起點（notesStart）之前，同調遍與遍之間沒有 cadence
     for (const kb of withCadence.keys) {
       const keyCadences = cadenceChords.filter((c) => c.keyIndex === kb.index);
-      expect(keyCadences).toHaveLength(2);
-      expect(kb.notesStart - kb.start).toBeCloseTo(2.0, 6); // 4 拍 × 0.5 秒
+      const expectedCount = kb.index === 0 ? 3 : 4;
+      expect(keyCadences).toHaveLength(expectedCount);
+      expect(kb.notesStart - kb.start).toBeCloseTo(expectedCount * 0.5, 6);
       for (const c of keyCadences) {
         expect(c.start).toBeGreaterThanOrEqual(kb.start - 1e-6);
         expect(c.start + c.dur).toBeLessThanOrEqual(kb.notesStart + 1e-6);
@@ -237,8 +239,12 @@ describe('exercise', () => {
     const padChords = withCadence.chords.filter((c) => c.role === 'pad');
     expect(padChords).toHaveLength(numKeys * 3 * chordCountPerPass);
 
-    // 總時長僅多出「調數 × 1 組 cadence (2 秒)」，而非「調數 × repeats × 1 組 cadence」
-    expect(withCadence.total - withoutCadence.total).toBeCloseTo(numKeys * 2.0, 6);
+    // 總時長僅多出「第 1 調 1.5 秒 + 其餘調各 2.0 秒」，而非「調數 × repeats × cadence」
+    const expectedCadenceDur = 1.5 + (numKeys - 1) * 2.0;
+    expect(withCadence.total - withoutCadence.total).toBeCloseTo(
+      expectedCadenceDur,
+      6,
+    );
     // 相較於 repeats=1，repeats=3 只增加純唱段時長（不含多餘 cadence）
     const passDur = singleRepeat.keys[0]!.end - singleRepeat.keys[0]!.notesStart;
     expect(withCadence.total - singleRepeat.total).toBeCloseTo(
@@ -263,7 +269,7 @@ describe('exercise', () => {
 
     expect(ex.keys).toHaveLength(2);
     const cadenceChords = ex.chords.filter((c) => c.role === 'cadence');
-    expect(cadenceChords).toHaveLength(4); // 2 個調 × 2 和弦（I, V/7）
+    expect(cadenceChords).toHaveLength(7); // 第 1 調 3 和弦 + 第 2 調 4 和弦
 
     for (const kb of ex.keys) {
       const listenNotes = ex.notes.filter(
@@ -374,6 +380,156 @@ describe('exercise', () => {
       if (i > 0) {
         expect(kb.start).toBeCloseTo(ex.keys[i - 1]!.end, 6);
       }
+    }
+  });
+
+  it('leading 與 direct 模式的事件順序、roman、拍長、midis 與無空拍皆符合規格', () => {
+    const leadingEx = buildExercise(majorArp, {
+      startTonic: 60,
+      low: 48,
+      high: 84,
+      bpm: 120, // 1 拍 = 0.5 秒
+      transpose: 'up',
+      cadence: 'leading',
+      countInBeats: 0,
+      restBeats: 1,
+    });
+
+    const k0Cad = leadingEx.chords.filter((c) => c.role === 'cadence' && c.keyIndex === 0);
+    expect(k0Cad.map((c) => c.roman)).toEqual(['I', 'V/7', 'I']);
+    expect(k0Cad.map((c) => c.dur)).toEqual([0.5, 0.5, 0.5]);
+    expect(k0Cad.map((c) => c.midis)).toEqual([
+      [48, 52, 55],
+      [47, 50, 55],
+      [48, 52, 55],
+    ]);
+    // notesStart 緊接最後一個引導和弦（無空拍）
+    expect(k0Cad[2]!.start + k0Cad[2]!.dur).toBeCloseTo(leadingEx.keys[0]!.notesStart, 6);
+
+    const k1Cad = leadingEx.chords.filter((c) => c.role === 'cadence' && c.keyIndex === 1);
+    expect(k1Cad.map((c) => c.roman)).toEqual(['I', 'I', 'V/7', 'I']);
+    expect(k1Cad.map((c) => c.dur)).toEqual([0.5, 0.5, 0.5, 0.5]);
+    expect(k1Cad.map((c) => c.midis)).toEqual([
+      [48, 52, 55],
+      [49, 53, 56],
+      [48, 51, 56],
+      [49, 53, 56],
+    ]);
+    expect(k1Cad[0]!.name).toBe('C');
+    expect(k1Cad[3]!.start + k1Cad[3]!.dur).toBeCloseTo(leadingEx.keys[1]!.notesStart, 6);
+
+    const k2Cad = leadingEx.chords.filter((c) => c.role === 'cadence' && c.keyIndex === 2);
+    expect(k2Cad.map((c) => c.midis)).toEqual([
+      [49, 53, 56],
+      [50, 54, 57],
+      [49, 52, 57],
+      [50, 54, 57],
+    ]);
+
+    const directEx = buildExercise(majorArp, {
+      startTonic: 60,
+      low: 48,
+      high: 84,
+      bpm: 120,
+      transpose: 'up',
+      cadence: 'direct',
+      countInBeats: 0,
+      restBeats: 1,
+    });
+
+    const d0Cad = directEx.chords.filter((c) => c.role === 'cadence' && c.keyIndex === 0);
+    expect(d0Cad.map((c) => c.roman)).toEqual(['I']);
+    expect(d0Cad.map((c) => c.dur)).toEqual([1.0]);
+    expect(d0Cad.map((c) => c.midis)).toEqual([[48, 52, 55]]);
+    expect(d0Cad[0]!.start + d0Cad[0]!.dur).toBeCloseTo(directEx.keys[0]!.notesStart, 6);
+
+    const d1Cad = directEx.chords.filter((c) => c.role === 'cadence' && c.keyIndex === 1);
+    expect(d1Cad.map((c) => c.roman)).toEqual(['I', 'I']);
+    expect(d1Cad.map((c) => c.dur)).toEqual([1.0, 1.0]);
+    expect(d1Cad.map((c) => c.midis)).toEqual([
+      [48, 52, 55],
+      [49, 53, 56],
+    ]);
+    expect(d1Cad[1]!.start + d1Cad[1]!.dur).toBeCloseTo(directEx.keys[1]!.notesStart, 6);
+  });
+
+  it('transpose up 跑 8 個調與 up-down 下行段皆維持就近平行聲部移動，且所有 cadence midis 長度為 3', () => {
+    const upEx = buildExercise(majorArp, {
+      startTonic: 60,
+      low: 48,
+      high: 79, // C4..G4 => 8 個調 (60..67)
+      bpm: 120,
+      transpose: 'up',
+      cadence: 'direct',
+      countInBeats: 0,
+    });
+    expect(upEx.keys).toHaveLength(8);
+    const upCadences = upEx.chords.filter((c) => c.role === 'cadence');
+    for (const c of upCadences) {
+      expect(c.midis).toHaveLength(3);
+    }
+    for (let ki = 1; ki < upEx.keys.length; ki++) {
+      const keyCad = upCadences.filter((c) => c.keyIndex === ki);
+      expect(keyCad).toHaveLength(2);
+      const prevI = keyCad[0]!.midis!;
+      const nextI = keyCad[1]!.midis!;
+      for (let v = 0; v < 3; v++) {
+        expect(nextI[v]!).toBeGreaterThan(prevI[v]!);
+      }
+    }
+
+    const upDownEx = buildExercise(majorArp, {
+      startTonic: 60,
+      low: 48,
+      high: 74, // C4..D4 => 60, 61, 62, 61, 60
+      bpm: 120,
+      transpose: 'up-down',
+      cadence: 'direct',
+      countInBeats: 0,
+    });
+    expect(upDownEx.keys.map((k) => k.tonicMidi)).toEqual([60, 61, 62, 61, 60]);
+    // 第 4 個調（index 3，D→C#）與第 5 個調（index 4，C#→C）為下行段
+    for (const ki of [3, 4]) {
+      const keyCad = upDownEx.chords.filter(
+        (c) => c.role === 'cadence' && c.keyIndex === ki,
+      );
+      expect(keyCad).toHaveLength(2);
+      const prevI = keyCad[0]!.midis!;
+      const nextI = keyCad[1]!.midis!;
+      for (let v = 0; v < 3; v++) {
+        expect(nextI[v]!).toBeLessThan(prevI[v]!);
+      }
+    }
+    // D→C# 參考音高：[50, 54, 57] -> [49, 53, 56]
+    const dToCSharp = upDownEx.chords.filter(
+      (c) => c.role === 'cadence' && c.keyIndex === 3,
+    );
+    expect(dToCSharp.map((c) => c.midis)).toEqual([
+      [50, 54, 57],
+      [49, 53, 56],
+    ]);
+  });
+
+  it('小調 i 與 V/7 的 midis 排列正確，且舊值 double 相容為 leading', () => {
+    const minorArp = BUILTIN_PATTERNS.find((p) => p.id === 'minor-arpeggio')!;
+    const ex = buildExercise(minorArp, {
+      startTonic: 60,
+      low: 48,
+      high: 79,
+      bpm: 120,
+      transpose: 'fixed',
+      cadence: 'double' as unknown as 'leading',
+      countInBeats: 0,
+    });
+    const cad = ex.chords.filter((c) => c.role === 'cadence');
+    expect(cad.map((c) => c.roman)).toEqual(['i', 'V/7', 'i']);
+    expect(cad.map((c) => c.midis)).toEqual([
+      [48, 51, 55],
+      [47, 50, 55],
+      [48, 51, 55],
+    ]);
+    for (const c of cad) {
+      expect(c.midis).toHaveLength(3);
     }
   });
 });

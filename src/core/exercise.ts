@@ -2,7 +2,7 @@ import { chordName, chordPitchClasses, parseRoman } from './chords';
 import type { Key, KeyMode } from './key';
 import { parseJianpu, type PatternDef } from './patterns';
 
-export type CadenceMode = 'off' | 'double' | 'single';
+export type CadenceMode = 'off' | 'direct' | 'leading' | 'single';
 
 export interface ExerciseOptions {
   startTonic: number;
@@ -15,7 +15,7 @@ export interface ExerciseOptions {
   repeats?: number;
   articulation?: 'legato' | 'staccato';
   transpose?: 'fixed' | 'up' | 'up-down';
-  /** 換調前提示和弦模式：'off' / false 關閉；'double' / true 為 I → V/7 雙和弦；'single' 為 1 拍 I 級單和弦快切（不斷拍） */
+  /** 換調前提示和弦模式：'off' / false 關閉；'direct' 直接升；'leading' / 'double' / true 為 5/7 導音；'single' 為 1 拍 I 級單和弦快切（不斷拍） */
   cadence?: boolean | CadenceMode;
   /** 預備拍數（只在最前面），預設 4 */
   countInBeats?: number;
@@ -62,6 +62,8 @@ export interface ChordEvent {
   roman: string;
   name: string;
   pcs: number[];
+  /** 由低到高的實際 MIDI 音高（direct／leading 引導和弦使用） */
+  midis?: number[];
   role: 'pad' | 'cadence';
   keyIndex: number;
 }
@@ -78,6 +80,29 @@ export interface Exercise {
   clicks: ClickEvent[];
   /** 總時長（秒） */
   total: number;
+}
+
+/** 將舊版或布林 cadence 設定正規化為 CadenceMode */
+function resolveCadenceMode(cadence: unknown): CadenceMode {
+  if (cadence === true || cadence === 'leading' || cadence === 'double') {
+    return 'leading';
+  }
+  if (cadence === 'direct' || cadence === 'single' || cadence === 'off') {
+    return cadence;
+  }
+  return 'off';
+}
+
+/** 計算主和弦三音 MIDI 排列（大調 1-3-5；小調 1-♭3-5） */
+function tonicTriadMidis(rootMidi: number, mode: KeyMode): number[] {
+  return mode === 'minor'
+    ? [rootMidi, rootMidi + 3, rootMidi + 7]
+    : [rootMidi, rootMidi + 4, rootMidi + 7];
+}
+
+/** 計算導音和弦 V/7 三音 MIDI 排列（低音 7、2、5） */
+function leadingChordMidis(rootMidi: number): number[] {
+  return [rootMidi - 1, rootMidi + 2, rootMidi + 7];
 }
 
 /** 依簡譜圖案與練習設定建立完整練習時間表 */
@@ -171,6 +196,12 @@ export function buildExercise(
     Number.isFinite(opts.displayTranspose)
       ? Math.round(opts.displayTranspose)
       : 0;
+  const cadenceMode = resolveCadenceMode(cadence);
+  // 整個練習只決定一次八度位移 O，使第一個調的主和弦根音落在 C3–B3（48–59）
+  const firstTonicMidi = tonicMidis[0]! + displayTranspose;
+  const firstRootTarget = 48 + (((firstTonicMidi % 12) + 12) % 12);
+  const cadenceOctaveOffset = firstRootTarget - firstTonicMidi;
+  const tonicRoman = resolvedKeyMode === 'minor' ? 'i' : 'I';
 
   for (let keyIndex = 0; keyIndex < tonicMidis.length; keyIndex++) {
     const tonicMidi = tonicMidis[keyIndex]! + displayTranspose;
@@ -180,47 +211,63 @@ export function buildExercise(
     };
     const keyStart = tCursor;
 
-    const cadenceMode: CadenceMode =
-      cadence === true
-        ? 'double'
-        : cadence === 'double' || cadence === 'single'
-          ? cadence
-          : 'off';
+    if (cadenceMode === 'direct' || cadenceMode === 'leading') {
+      const rootMidi = tonicMidi + cadenceOctaveOffset;
+      const prevTonicMidi =
+        keyIndex > 0 ? tonicMidis[keyIndex - 1]! + displayTranspose : tonicMidi;
+      const prevKey: Key = {
+        tonicPc: ((prevTonicMidi % 12) + 12) % 12,
+        mode: resolvedKeyMode,
+      };
+      const prevRootMidi = prevTonicMidi + cadenceOctaveOffset;
 
-    if (cadenceMode === 'double') {
-      const cadenceSteps: ReadonlyArray<{ roman: string; beats: number }> =
-        resolvedKeyMode === 'minor'
-          ? [
-              { roman: 'i', beats: 2 },
-              { roman: 'V/7', beats: 1 },
-            ]
-          : [
-              { roman: 'I', beats: 2 },
-              { roman: 'V/7', beats: 1 },
-            ];
-      for (const step of cadenceSteps) {
+      const steps: Array<{
+        stepKey: Key;
+        stepRoot: number;
+        roman: string;
+        beats: number;
+      }> = [];
+
+      if (cadenceMode === 'direct') {
+        if (keyIndex > 0) {
+          steps.push({ stepKey: prevKey, stepRoot: prevRootMidi, roman: tonicRoman, beats: 2 });
+        }
+        steps.push({ stepKey: key, stepRoot: rootMidi, roman: tonicRoman, beats: 2 });
+      } else {
+        if (keyIndex > 0) {
+          steps.push({ stepKey: prevKey, stepRoot: prevRootMidi, roman: tonicRoman, beats: 1 });
+        }
+        steps.push({ stepKey: key, stepRoot: rootMidi, roman: tonicRoman, beats: 1 });
+        steps.push({ stepKey: key, stepRoot: rootMidi, roman: 'V/7', beats: 1 });
+        steps.push({ stepKey: key, stepRoot: rootMidi, roman: tonicRoman, beats: 1 });
+      }
+
+      for (const step of steps) {
         const dur = step.beats * beatSec;
+        const midis =
+          step.roman === 'V/7'
+            ? leadingChordMidis(step.stepRoot)
+            : tonicTriadMidis(step.stepRoot, resolvedKeyMode);
         chords.push({
           start: tCursor,
           dur,
           roman: step.roman,
-          name: chordName(step.roman, key),
-          pcs: chordPitchClasses(step.roman, key),
+          name: chordName(step.roman, step.stepKey),
+          pcs: chordPitchClasses(step.roman, step.stepKey),
+          midis,
           role: 'cadence',
           keyIndex,
         });
         tCursor += dur;
       }
-      tCursor += beatSec; // 1 拍空（吸氣預備拍）
     } else if (cadenceMode === 'single') {
       // 1 拍極速不斷拍：只彈 1 拍新調一級和弦，下一拍直接開唱
-      const roman = resolvedKeyMode === 'minor' ? 'i' : 'I';
       chords.push({
         start: tCursor,
         dur: beatSec,
-        roman,
-        name: chordName(roman, key),
-        pcs: chordPitchClasses(roman, key),
+        roman: tonicRoman,
+        name: chordName(tonicRoman, key),
+        pcs: chordPitchClasses(tonicRoman, key),
         role: 'cadence',
         keyIndex,
       });

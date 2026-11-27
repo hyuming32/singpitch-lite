@@ -35,8 +35,10 @@ interface StaffViewProps {
   rightPad?: number;
   metrics: StaffVerticalMetrics;
   sung: SungPoint[];
-  /** 沒播放時的即時演唱黃線（開麥克風就顯示）；畫法與 sung 相同，稍淡 */
+  /** 沒播放時的即時演唱音高線（開麥克風就顯示）；畫法與 sung 相同，稍淡 */
   liveSung?: SungPoint[];
+  /** 演唱音高線顏色（預設 #e8b400） */
+  pitchColor?: string;
   countIn: { active: boolean; dots: boolean[] };
   isTablet: boolean;
 }
@@ -58,6 +60,7 @@ export function StaffView({
   metrics,
   sung,
   liveSung,
+  pitchColor = '#e8b400',
   countIn,
   isTablet,
 }: StaffViewProps) {
@@ -311,11 +314,11 @@ export function StaffView({
         );
       })}
 
-      {/* 演唱黃線 */}
+      {/* 演唱音高線 */}
       {sungPath && (
         <path
           d={sungPath}
-          stroke="#e8b400"
+          stroke={pitchColor}
           strokeWidth={4}
           strokeLinecap="round"
           strokeLinejoin="round"
@@ -323,12 +326,12 @@ export function StaffView({
         />
       )}
 
-      {/* 即時演唱黃線（沒播放時） */}
+      {/* 即時演唱音高線（沒播放時） */}
       {liveSungPath && (
         <path
           className="staff-live-sung"
           d={liveSungPath}
-          stroke="#e8b400"
+          stroke={pitchColor}
           strokeOpacity={0.85}
           strokeWidth={4}
           strokeLinecap="round"

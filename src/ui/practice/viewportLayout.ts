@@ -91,7 +91,7 @@ export function computeViewportLayout(
         ? 1194
         : 844;
 
-  const headerHeight = isTablet ? 56 : 35;
+  const headerHeight = isTablet ? 61 : 40;
   const transportHeight = isTablet ? 64 : 30;
   const pageGap = isTablet ? 10 : 4;
   const wsGap = isTablet ? 10 : 4;
@@ -111,12 +111,12 @@ export function computeViewportLayout(
   const handleHeight = handleBarHeight(isTablet);
   const miniPianoH = miniPianoHeight(isTablet);
   const defaultPianoH = defaultPianoHeight(isTablet);
-  const centsHeight = isTablet ? 37 : 22;
+  const centsHeight = 0;
   const sheetPadY = isTablet ? 16 : 4;
   const jianpuHeight = isTablet ? 52 : 24;
   const minLineHeight = minScoreLineHeight(isTablet);
 
-  // 正常情況下優先保留給「1 行完整五線譜＋簡譜＋cents 色條」的最小面板高度
+  // 正常情況下優先保留給「1 行完整五線譜＋簡譜」的最小面板高度
   const minPreferredSheetPaperH = isTablet ? 203 : 175;
   // 使用者手動展開時，仍須保證 1 行五線譜含上下加線各 2 條不被裁切的嚴格最小高度
   const minUnclippedStaffH = isTablet ? 90 : 72;
@@ -308,8 +308,8 @@ export function computePortraitLayout(
         ? Math.max(0, Math.round((safe.left ?? 0) + (safe.right ?? 0)))
         : 16;
 
-  const headerHeight = 38;
-  const centsHeight = 24;
+  const headerHeight = 43;
+  const centsHeight = 0;
   const jianpuHeight = 20;
   const handleHeight = handleBarHeight(false); // 10
   const miniPianoH = miniPianoHeight(false); // 18
@@ -345,7 +345,7 @@ export function computePortraitLayout(
   const whiteKeyWidth = contentWidth / 15; // 2 個八度（15 個白鍵 C–C）
   const autoCollapseThreshold = whiteKeyWidth * 1.8;
 
-  // 優先保留 3 行最小高度 + 2px 分隔線 + cents 色條
+  // 優先保留 3 行最小高度 + 2px 分隔線
   const minPreferredSheetPaperH =
     sheetPadY + centsHeight + minLineHeight * 3 + 2;
   const minUnclippedStaffH = 66;

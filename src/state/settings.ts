@@ -93,6 +93,9 @@ export interface PracticeSettings {
   singPianoVolume: number;
   echoCancellation: boolean;
   noiseGateDb: number;
+  noiseCalibrated: boolean;
+  staffPitchColor: string;
+  pianoNeedleColor: string;
   latencyOffsetMs: number;
   hideSpeakerHint: boolean;
   voice: VoiceOption;
@@ -112,7 +115,7 @@ export const DEFAULT_SETTINGS: PracticeSettings = {
   mode: 'listen-then-sing',
   pianoDuringSing: true,
   pad: true,
-  cadence: 'double',
+  cadence: 'leading',
   countIn: true,
   metronome: true,
   jianpuMode: 'fixed',
@@ -123,6 +126,9 @@ export const DEFAULT_SETTINGS: PracticeSettings = {
   singPianoVolume: 70,
   echoCancellation: false,
   noiseGateDb: -45,
+  noiseCalibrated: false,
+  staffPitchColor: '#e8b400',
+  pianoNeedleColor: '#0047ff',
   latencyOffsetMs: 0,
   hideSpeakerHint: false,
   voice: 'normal',
@@ -200,6 +206,32 @@ function sanitizeBpm(value: unknown, fallback: number): number {
 
 function validateBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback;
+}
+
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+
+function sanitizeHexColor(value: unknown, fallback: string): string {
+  return typeof value === 'string' && HEX_COLOR_RE.test(value)
+    ? value
+    : fallback;
+}
+
+function sanitizeCadence(value: unknown): CadenceMode {
+  if (
+    value === 'off' ||
+    value === 'direct' ||
+    value === 'leading' ||
+    value === 'single'
+  ) {
+    return value;
+  }
+  if (value === 'double' || value === true) {
+    return 'leading';
+  }
+  if (value === false) {
+    return 'off';
+  }
+  return DEFAULT_SETTINGS.cadence;
 }
 
 function sanitizeMyRange(value: unknown): MyRangeData | null {
@@ -361,14 +393,7 @@ export function sanitizeSettings(raw: unknown): PracticeSettings {
     mode,
     pianoDuringSing: validateBoolean(obj.pianoDuringSing, DEFAULT_SETTINGS.pianoDuringSing),
     pad: validateBoolean(obj.pad, DEFAULT_SETTINGS.pad),
-    cadence:
-      obj.cadence === 'off' || obj.cadence === 'double' || obj.cadence === 'single'
-        ? obj.cadence
-        : typeof obj.cadence === 'boolean'
-          ? obj.cadence
-            ? 'double'
-            : 'off'
-          : DEFAULT_SETTINGS.cadence,
+    cadence: sanitizeCadence(obj.cadence),
     countIn: validateBoolean(obj.countIn, DEFAULT_SETTINGS.countIn),
     metronome: validateBoolean(obj.metronome, DEFAULT_SETTINGS.metronome),
     jianpuMode,
@@ -397,6 +422,18 @@ export function sanitizeSettings(raw: unknown): PracticeSettings {
       -80,
       -20,
       DEFAULT_SETTINGS.noiseGateDb,
+    ),
+    noiseCalibrated: validateBoolean(
+      obj.noiseCalibrated,
+      DEFAULT_SETTINGS.noiseCalibrated,
+    ),
+    staffPitchColor: sanitizeHexColor(
+      obj.staffPitchColor,
+      DEFAULT_SETTINGS.staffPitchColor,
+    ),
+    pianoNeedleColor: sanitizeHexColor(
+      obj.pianoNeedleColor,
+      DEFAULT_SETTINGS.pianoNeedleColor,
     ),
     latencyOffsetMs: clampInt(
       obj.latencyOffsetMs,

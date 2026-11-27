@@ -53,7 +53,7 @@ function assertStaffFitsWithTwoLedgerLines(
 }
 
 describe('viewportLayout 版面高度分配', () => {
-  it('iPhone Safari 分頁模式 H=300, W=844：標題 35px、播放列 30px、把手 10px，鋼琴自動收合為 18px，1 行五線譜不裁切', () => {
+  it('iPhone Safari 分頁模式 H=300, W=844：標題 40px、播放列 30px、把手 10px，鋼琴自動收合為 18px，1 行五線譜不裁切', () => {
     const layout = computeViewportLayout({
       height: 300,
       width: 844,
@@ -61,7 +61,8 @@ describe('viewportLayout 版面高度分配', () => {
       collapsedPref: 'auto',
     });
 
-    expect(layout.headerHeight).toBe(35);
+    expect(layout.headerHeight).toBe(40);
+    expect(layout.centsHeight).toBe(0);
     expect(layout.transportHeight).toBe(30);
     expect(layout.handleHeight).toBe(10);
     expect(layout.autoCollapsed).toBe(true);
@@ -110,7 +111,7 @@ describe('viewportLayout 版面高度分配', () => {
       collapsedPref: 'auto',
     });
 
-    expect(expanded.headerHeight).toBe(35);
+    expect(expanded.headerHeight).toBe(40);
     expect(expanded.transportHeight).toBe(30);
     expect(expanded.handleHeight).toBe(10);
     expect(expanded.autoCollapsed).toBe(false);
@@ -197,7 +198,7 @@ describe('viewportLayout 版面高度分配', () => {
       collapsedPref: 'auto',
     });
 
-    expect(layout.headerHeight).toBe(35);
+    expect(layout.headerHeight).toBe(40);
     expect(layout.transportHeight).toBe(30);
     expect(layout.handleHeight).toBe(10);
     expect(layout.autoCollapsed).toBe(true);
@@ -210,10 +211,10 @@ describe('viewportLayout 版面高度分配', () => {
 
   it('自動收合條件邊界：< 白鍵寬 × 1.8 時自動收合，>= 白鍵寬 × 1.8 時保持展開', () => {
     // 手機 contentWidth = 844 - 96 = 748，whiteKeyWidth = 748 / 19 ≈ 39.37，門檻 ≈ 70.86
-    // 非樂譜與非鋼琴固定高度 = 35 + 30 + 10 + 8 + 8 + 8 = 99，minPreferredSheetPaperH = 175
-    // H = 344 -> remainingForPiano = 245 - 175 = 70 < 70.86 -> 自動收合
+    // 非樂譜與非鋼琴固定高度 = 40 + 30 + 10 + 8 + 8 + 8 = 104，minPreferredSheetPaperH = 175
+    // H = 349 -> remainingForPiano = 245 - 175 = 70 < 70.86 -> 自動收合
     const justBelow = computeViewportLayout({
-      height: 344,
+      height: 349,
       width: 844,
       device: 'phone',
       collapsedPref: 'auto',
@@ -221,9 +222,9 @@ describe('viewportLayout 版面高度分配', () => {
     expect(justBelow.autoCollapsed).toBe(true);
     expect(justBelow.collapsed).toBe(true);
 
-    // H = 345 -> remainingForPiano = 246 - 175 = 71 >= 70.86 -> 展開
+    // H = 350 -> remainingForPiano = 246 - 175 = 71 >= 70.86 -> 展開
     const justAbove = computeViewportLayout({
-      height: 345,
+      height: 350,
       width: 844,
       device: 'phone',
       collapsedPref: 'auto',
@@ -248,8 +249,8 @@ describe('computePortraitLayout 手機直放版面分配', () => {
     });
 
     expect(layout.totalHeight).toBeLessThanOrEqual(H);
-    expect(layout.headerHeight).toBe(38);
-    expect(layout.centsHeight).toBe(24);
+    expect(layout.headerHeight).toBe(43);
+    expect(layout.centsHeight).toBe(0);
     expect(layout.jianpuHeight).toBe(20);
     expect(layout.handleHeight).toBe(10);
     expect(layout.pianoHeight).toBe(116);

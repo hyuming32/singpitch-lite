@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { buildExercise, type Exercise } from '../core/exercise';
+import { buildExercise, type CadenceMode, type Exercise } from '../core/exercise';
 import { displayNoteName } from './noteLabel';
 import type { PatternDef } from '../core/patterns';
 import {
@@ -55,6 +55,13 @@ const TRANSPOSE_OPTIONS: { value: TransposeOption; label: string }[] = [
 const MODE_OPTIONS: { value: PracticeModeOption; label: string }[] = [
   { value: 'follow', label: '跟唱' },
   { value: 'listen-then-sing', label: '先聽再唱' },
+];
+
+const CADENCE_OPTIONS: { value: CadenceMode; label: string }[] = [
+  { value: 'off', label: '關閉' },
+  { value: 'direct', label: '直接升' },
+  { value: 'leading', label: '5/7 導音' },
+  { value: 'single', label: '單和弦快切' },
 ];
 
 /** 右側練習設定面板（含試聽與開始練唱） */
@@ -398,27 +405,16 @@ export function SettingsPanel({
         <div className="setting-row">
           <span className="setting-label">提示和弦</span>
           <div className="segmented-group">
-            <button
-              type="button"
-              className={`seg-btn ${settings.cadence === 'off' ? 'is-active' : ''}`}
-              onClick={() => onUpdate({ cadence: 'off' })}
-            >
-              關閉
-            </button>
-            <button
-              type="button"
-              className={`seg-btn ${settings.cadence === 'double' ? 'is-active' : ''}`}
-              onClick={() => onUpdate({ cadence: 'double' })}
-            >
-              雙和弦
-            </button>
-            <button
-              type="button"
-              className={`seg-btn ${settings.cadence === 'single' ? 'is-active' : ''}`}
-              onClick={() => onUpdate({ cadence: 'single' })}
-            >
-              單和弦快切
-            </button>
+            {CADENCE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                className={`seg-btn ${settings.cadence === opt.value ? 'is-active' : ''}`}
+                onClick={() => onUpdate({ cadence: opt.value })}
+              >
+                {opt.label}
+              </button>
+            ))}
           </div>
         </div>
 

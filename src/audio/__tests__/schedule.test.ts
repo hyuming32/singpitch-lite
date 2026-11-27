@@ -32,20 +32,23 @@ describe('compileExercise', () => {
     expect(clicks).toHaveLength(4);
     expect(clicks.map((c) => c.frame)).toEqual([0, 24000, 48000, 72000]);
 
-    // 驗證 cadence 兩個引導和弦（I → V/7，每個和弦 3 個音 = 6 個 noteOn）
+    // 驗證 cadence 三個引導和弦（I → V/7 → I，每個和弦 3 個音 = 9 個 noteOn）
     const cadenceOn = compiled.events.filter(
       (e) => e.type === 'noteOn' && e.bus === 'cadence',
     );
-    expect(cadenceOn).toHaveLength(6);
-    // 驗證 C 大調 I (1 3 5 = C4 E4 G4) → V/7 (7低 2 5 = B3 D4 G4) 的就近聲部連接
+    expect(cadenceOn).toHaveLength(9);
+    // 驗證 C 大調 I [48,52,55] → V/7 [47,50,55] → I [48,52,55]
     const cadenceIds = cadenceOn.map((e) => (e.type === 'noteOn' ? e.id : ''));
     expect(cadenceIds).toEqual([
-      'cadence:0:60',
-      'cadence:0:64',
-      'cadence:0:67',
-      'cadence:1:59',
-      'cadence:1:62',
-      'cadence:1:67',
+      'cadence:0:48',
+      'cadence:0:52',
+      'cadence:0:55',
+      'cadence:1:47',
+      'cadence:1:50',
+      'cadence:1:55',
+      'cadence:2:48',
+      'cadence:2:52',
+      'cadence:2:55',
     ]);
 
     // 驗證 pad id 前綴
@@ -218,6 +221,37 @@ describe('compileExercise', () => {
         const intervalSec = (clicks[i]!.frame - clicks[i - 1]!.frame) / rate;
         expect(Math.abs(intervalSec - expectedBeatSec)).toBeLessThan(1 / rate);
       }
+    }
+  });
+
+  it('cadence 事件帶有 midis 時，排程出來的音高與 midis 完全一致', () => {
+    const ex = buildExercise(majorArp, {
+      startTonic: 60,
+      low: 48,
+      high: 74, // C4, C#4, D4
+      bpm: 120,
+      cadence: 'direct',
+      countInBeats: 0,
+      transpose: 'up',
+    });
+
+    const compiled = compileExercise(ex, rate, {
+      a4: 440,
+      pad: false,
+      click: false,
+    });
+
+    const cadenceChords = ex.chords.filter((c) => c.role === 'cadence');
+    const cadenceOn = compiled.events.filter(
+      (e): e is Extract<typeof e, { type: 'noteOn' }> =>
+        e.type === 'noteOn' && e.bus === 'cadence',
+    );
+
+    const expectedMidis = cadenceChords.flatMap((c) => c.midis ?? []);
+    expect(cadenceOn).toHaveLength(expectedMidis.length);
+    for (let i = 0; i < expectedMidis.length; i++) {
+      const expectedHz = 440 * Math.pow(2, (expectedMidis[i]! - 69) / 12);
+      expect(cadenceOn[i]!.hz).toBeCloseTo(expectedHz, 6);
     }
   });
 });

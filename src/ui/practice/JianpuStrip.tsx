@@ -18,6 +18,9 @@ interface JianpuStripProps {
   previewLabel?: string | null;
   /** 左上角覆寫標籤（例：「D 第 2/2 遍」、「D 第 2 遍」、「下一個 E♭」） */
   lineLabel?: string | null;
+  /** 八度位移小標籤（例：「8va」、「15ma」、「8vb」） */
+  octaveTag?: string | null;
+  height?: number;
 }
 
 /** 簡譜帶：每個數字水平對齊下方五線譜音符的 x 座標 */
@@ -31,6 +34,8 @@ export function JianpuStrip({
   isTablet,
   previewLabel,
   lineLabel,
+  octaveTag,
+  height,
 }: JianpuStripProps) {
   const modeLabel =
     lineLabel !== undefined
@@ -40,12 +45,24 @@ export function JianpuStrip({
   const isPreviewStyled = Boolean(previewLabel);
 
   return (
-    <div className={`jianpu-strip ${isTablet ? 'is-tablet' : ''}`}>
-      {modeLabel !== null && modeLabel !== '' && (
-        <span
-          className={`jianpu-mode-tag ${isPreviewStyled ? 'is-preview-label' : ''}`}
-        >
-          {modeLabel}
+    <div
+      className={`jianpu-strip ${isTablet ? 'is-tablet' : ''}`}
+      style={height !== undefined ? { height: `${height}px` } : undefined}
+    >
+      {((modeLabel !== null && modeLabel !== '') || octaveTag) && (
+        <span className="jianpu-tag-row">
+          {modeLabel !== null && modeLabel !== '' && (
+            <span
+              className={`jianpu-mode-tag ${isPreviewStyled ? 'is-preview-label' : ''}`}
+            >
+              {modeLabel}
+            </span>
+          )}
+          {octaveTag && (
+            <span className="jianpu-octave-tag" aria-label={`八度顯示 ${octaveTag}`}>
+              {octaveTag}
+            </span>
+          )}
         </span>
       )}
 

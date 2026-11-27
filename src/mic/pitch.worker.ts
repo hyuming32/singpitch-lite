@@ -3,6 +3,7 @@ import { PitchTracker, type PitchFeatures } from './pitchTracker.ts';
 
 export type PitchWorkerInMessage =
   | { type: 'init'; rate: number; gateDb: number }
+  | { type: 'rate'; rate: number }
   | { type: 'gate'; gateDb: number }
   | { type: 'reset' }
   | { type: 'audio'; samples: Float32Array; frame: number };
@@ -15,7 +16,8 @@ export type PitchWorkerOutMessage = {
   features: PitchFeatures;
 };
 
-let tracker = new PitchTracker(48000, GATE_DB);
+let currentGateDb = GATE_DB;
+let tracker = new PitchTracker(48000, currentGateDb);
 
 self.onmessage = (ev: MessageEvent<PitchWorkerInMessage>) => {
   const msg = ev.data;
@@ -23,9 +25,14 @@ self.onmessage = (ev: MessageEvent<PitchWorkerInMessage>) => {
 
   switch (msg.type) {
     case 'init':
-      tracker = new PitchTracker(msg.rate, msg.gateDb);
+      currentGateDb = msg.gateDb;
+      tracker = new PitchTracker(msg.rate, currentGateDb);
+      break;
+    case 'rate':
+      tracker = new PitchTracker(msg.rate, currentGateDb);
       break;
     case 'gate':
+      currentGateDb = msg.gateDb;
       tracker.setGateDb(msg.gateDb);
       break;
     case 'reset':

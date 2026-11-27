@@ -5,6 +5,7 @@ import {
   type PracticeSettings,
 } from '../state/settings';
 import { AudioProvider } from './AudioContext';
+import { ErrorBoundary } from './ErrorBoundary';
 import { PatternMenu } from './PatternMenu';
 import { PracticePage } from './practice/PracticePage';
 
@@ -71,11 +72,13 @@ export function AppShell() {
     return (
       <AudioProvider>
         <div className="app-shell is-practice">
-          <PracticePage
-            settings={settings}
-            onUpdateSettings={handleUpdateSettings}
-            onBack={() => navigateTo('scale')}
-          />
+          <ErrorBoundary label="PracticePage">
+            <PracticePage
+              settings={settings}
+              onUpdateSettings={handleUpdateSettings}
+              onBack={() => navigateTo('scale')}
+            />
+          </ErrorBoundary>
         </div>
       </AudioProvider>
     );

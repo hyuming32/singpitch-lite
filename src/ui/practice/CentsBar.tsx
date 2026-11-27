@@ -1,10 +1,11 @@
 interface CentsBarProps {
   cents: number | null;
   isTablet: boolean;
+  height?: number;
 }
 
 /** 音準偏離色條（−50 至 +50 cents）與即時指針 */
-export function CentsBar({ cents, isTablet }: CentsBarProps) {
+export function CentsBar({ cents, isTablet, height }: CentsBarProps) {
   const showPointer = cents !== null && Number.isFinite(cents);
   const clamped = showPointer ? Math.max(-50, Math.min(50, cents)) : 0;
   const pointerPercent = ((clamped + 50) / 100) * 100;
@@ -12,6 +13,7 @@ export function CentsBar({ cents, isTablet }: CentsBarProps) {
   return (
     <div
       className={`cents-bar ${isTablet ? 'is-tablet' : ''}`}
+      style={height !== undefined ? { height: `${height}px` } : undefined}
       aria-label="音準偏差條"
     >
       <div className="cents-track-wrap">

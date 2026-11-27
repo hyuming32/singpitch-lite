@@ -9,10 +9,17 @@ import { micCtxSecToSongSec } from '../../mic/latency';
 import {
   MicController,
   MicPermissionError,
+  type MicDiagnostics,
   type MicPitchFrame,
 } from '../../mic/micController';
+import {
+  OctaveShiftTracker,
+  formatOctaveShiftBadge,
+  type OctaveShiftK,
+} from '../../mic/octaveShift';
 import { outputAt, type ActiveKey } from '../../mic/outputAt';
 import { ConfusionDetector, VoiceGate } from '../../mic/voiceGate';
+import { isStandaloneMode } from '../../state/errlog';
 import {
   fullIndexToTonicListIndex,
   loadKeySelection,
@@ -55,14 +62,24 @@ import {
 import {
   clampPianoHeight,
   defaultPianoHeight,
-  handleBarHeight,
   miniPianoHeight,
-  minScoreLineHeight,
   previewDrawerDrag,
   resolveDrawerPointerEnd,
 } from './pianoDrawer';
+import {
+  isIosBrowserMode,
+  markIosInstallHintDismissed,
+  readIosInstallHintDismissed,
+} from './iosInstallHint';
+import {
+  computeViewportLayout,
+  type PianoCollapsedPref,
+} from './viewportLayout';
 import { PianoKeyboard } from '../piano/PianoKeyboard';
-import { PracticeSettingsSheet } from './PracticeSettingsSheet';
+import {
+  PracticeSettingsSheet,
+  type PracticeDiagnosticsSnapshot,
+} from './PracticeSettingsSheet';
 import { StaffView, type SungPoint } from './StaffView';
 import { TransportBar } from './TransportBar';
 
@@ -78,7 +95,8 @@ const EMPTY_SUNG: SungPoint[] = [];
 
 interface RawSungSample {
   t: number;
-  hz: number;
+  rawHz: number;
+  autoK: OctaveShiftK;
   voiced: boolean;
 }
 
@@ -96,7 +114,11 @@ function readViewport() {
   if (typeof window === 'undefined') {
     return { width: 844, height: 390 };
   }
-  return { width: window.innerWidth, height: window.innerHeight };
+  const vv = window.visualViewport;
+  return {
+    width: Math.round(vv ? vv.width : window.innerWidth),
+    height: Math.round(vv ? vv.height : window.innerHeight),
+  };
 }
 
 /** 正式練唱畫面：上方 cents 色條、簡譜帶與五線譜，下方對音鋼琴與播放列 */
@@ -112,28 +134,49 @@ export function PracticePage({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [boundaryToast, setBoundaryToast] = useState(false);
   const [scoreWidth, setScoreWidth] = useState(720);
-  const [workspaceHeight, setWorkspaceHeight] = useState(0);
+  const [safePadding, setSafePadding] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
   const [dragHeight, setDragHeight] = useState<number | null>(null);
+  const [forceExpandPiano, setForceExpandPiano] = useState(false);
+  const [iosHintVisible, setIosHintVisible] = useState(
+    () => isIosBrowserMode() && !readIosInstallHintDismissed(),
+  );
+  const [iosHintFading, setIosHintFading] = useState(false);
   const [micActive, setMicActive] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [liveDb, setLiveDb] = useState<number | null>(null);
   const [sungMidi, setSungMidi] = useState<number | null>(null);
   const [currentCents, setCurrentCents] = useState<number | null>(null);
   const [sungVersion, setSungVersion] = useState(0);
+  const [autoOctaveK, setAutoOctaveK] = useState<OctaveShiftK>(0);
   const [confusionBubbleOpen, setConfusionBubbleOpen] = useState(false);
   const [infLoopCount, setInfLoopCount] = useState(1);
 
   const micController = useMemo(() => new MicController(engine), [engine]);
   const voiceGateRef = useRef(new VoiceGate());
+  const octaveTrackerRef = useRef(new OctaveShiftTracker());
+  const autoOctaveKRef = useRef<OctaveShiftK>(0);
   const confusionRef = useRef(new ConfusionDetector());
   const rawSungRef = useRef<RawSungSample[]>([]);
   const recentVoiceRef = useRef<{ wallMs: number; hz: number }[]>([]);
+  const recentDetectedRef = useRef<
+    { wallMs: number; hz: number; midi: number }[]
+  >([]);
+  const unmountedRef = useRef(false);
   const activeKeysRef = useRef<ActiveKey[]>([]);
   const pressedOnsetsRef = useRef<Map<number, number>>(new Map());
   const targetMidiRef = useRef<number | null>(null);
+  const targetNoteRef = useRef<{ midi: number | null; key: string | null }>({
+    midi: null,
+    key: null,
+  });
   const currentPhaseRef = useRef<'listen' | 'sing'>('sing');
   const playingRef = useRef(playing);
   playingRef.current = playing;
+  const micActiveRef = useRef(micActive);
+  micActiveRef.current = micActive;
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
   const repeatsPerKeyRef = useRef(settings.repeatsPerKey);
@@ -146,6 +189,7 @@ export function PracticePage({
   const loopAnchorKeyRef = useRef(0);
   const infLoopRef = useRef<{ lastSeekAt: number }>({ lastSeekAt: 0 });
 
+  const pageRef = useRef<HTMLDivElement | null>(null);
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const scoreAreaRef = useRef<HTMLDivElement | null>(null);
   const handleDragRef = useRef<{
@@ -173,43 +217,99 @@ export function PracticePage({
     playing: false,
   });
 
-  // 追蹤視窗大小與橫直向切換
+  // 追蹤視窗大小、visualViewport 與橫直向切換
   useEffect(() => {
+    let rafId = 0;
     const onResize = () => setViewport(readViewport());
+    const onOrientation = () => {
+      onResize();
+      rafId = requestAnimationFrame(onResize);
+    };
+    onResize();
     window.addEventListener('resize', onResize);
-    window.addEventListener('orientationchange', onResize);
+    window.addEventListener('orientationchange', onOrientation);
+    const vv = window.visualViewport;
+    vv?.addEventListener('resize', onResize);
     return () => {
+      if (rafId) cancelAnimationFrame(rafId);
       window.removeEventListener('resize', onResize);
-      window.removeEventListener('orientationchange', onResize);
+      window.removeEventListener('orientationchange', onOrientation);
+      vv?.removeEventListener('resize', onResize);
     };
   }, []);
 
   const isPortraitPhone =
     viewport.width < 600 && viewport.height > viewport.width;
   const isTablet = viewport.height > 500;
+  const device = isTablet ? 'tablet' : 'phone';
 
-  // 量測譜面紙張寬度與工作區高度
+  const autoLayout = computeViewportLayout({
+    height: viewport.height,
+    width: viewport.width,
+    device,
+    collapsedPref: 'auto',
+    preferredPianoHeight: settings.pianoHeight,
+    safePaddingY: safePadding?.y,
+    safePaddingX: safePadding?.x,
+  });
+
+  useEffect(() => {
+    if (forceExpandPiano && !autoLayout.autoCollapsed) {
+      setForceExpandPiano(false);
+    }
+  }, [forceExpandPiano, autoLayout.autoCollapsed]);
+
+  // iOS 瀏覽器分頁模式下第一次進練唱頁顯示加入主畫面提示，3 秒後自動淡出
+  useEffect(() => {
+    if (!iosHintVisible) return;
+    const fadeTimer = window.setTimeout(() => {
+      setIosHintFading(true);
+      markIosInstallHintDismissed();
+    }, 3000);
+    const hideTimer = window.setTimeout(() => {
+      setIosHintVisible(false);
+    }, 3400);
+    return () => {
+      window.clearTimeout(fadeTimer);
+      window.clearTimeout(hideTimer);
+    };
+  }, [iosHintVisible]);
+
+  // 量測譜面紙張寬度與安全區內距
   useEffect(() => {
     if (isPortraitPhone) return;
+    const pageEl = pageRef.current;
     const scoreEl = scoreAreaRef.current;
-    const wsEl = workspaceRef.current;
 
     const updateSizes = () => {
+      if (pageEl) {
+        const cs = getComputedStyle(pageEl);
+        const padY =
+          (parseFloat(cs.paddingTop) || 0) +
+          (parseFloat(cs.paddingBottom) || 0);
+        const padX =
+          (parseFloat(cs.paddingLeft) || 0) +
+          (parseFloat(cs.paddingRight) || 0);
+        const nextX = Math.round(padX);
+        const nextY = Math.round(padY);
+        setSafePadding((prev) =>
+          prev && prev.x === nextX && prev.y === nextY
+            ? prev
+            : { x: nextX, y: nextY },
+        );
+      }
       if (scoreEl && scoreEl.clientWidth > 0) {
         setScoreWidth(scoreEl.clientWidth);
-      }
-      if (wsEl && wsEl.clientHeight > 0) {
-        setWorkspaceHeight(wsEl.clientHeight);
       }
     };
     updateSizes();
 
     if (typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(updateSizes);
+    if (pageEl) ro.observe(pageEl);
     if (scoreEl) ro.observe(scoreEl);
-    if (wsEl) ro.observe(wsEl);
     return () => ro.disconnect();
-  }, [isPortraitPhone]);
+  }, [isPortraitPhone, viewport.width, viewport.height]);
 
   const pattern = useMemo(
     () =>
@@ -526,6 +626,9 @@ export function PracticePage({
     rawSungRef.current = [];
     recentVoiceRef.current = [];
     voiceGateRef.current.reset();
+    octaveTrackerRef.current.reset();
+    autoOctaveKRef.current = 0;
+    setAutoOctaveK(0);
     confusionRef.current.reset();
     setConfusionBubbleOpen(false);
     setSungMidi(null);
@@ -535,8 +638,10 @@ export function PracticePage({
 
   // 離開頁面時關閉麥克風
   useEffect(() => {
+    unmountedRef.current = false;
     return () => {
-      void micController.stop();
+      unmountedRef.current = true;
+      void micController.stop().catch(() => {});
     };
   }, [micController]);
 
@@ -546,6 +651,21 @@ export function PracticePage({
       if (settingsOpenRef.current) {
         setLiveDb(frame.db);
       }
+
+      const nowWallMs = performance.now();
+      if (frame.hz > 0 && Number.isFinite(frame.hz)) {
+        const detMidi = hzToMidi(frame.hz, cfg.a4);
+        if (Number.isFinite(detMidi)) {
+          recentDetectedRef.current.push({
+            wallMs: nowWallMs,
+            hz: frame.hz,
+            midi: detMidi,
+          });
+        }
+      }
+      recentDetectedRef.current = recentDetectedRef.current.filter(
+        (item) => nowWallMs - item.wallMs <= 1000,
+      );
 
       const isPlaying = playingRef.current;
       const offsetSec = engine.ctxToSongOffsetSec;
@@ -570,6 +690,7 @@ export function PracticePage({
             activeKeys: activeKeysRef.current,
           });
 
+      // VoiceGate 漏音比對必須使用原始 Hz（位移前）
       const gate = voiceGateRef.current.processFrame(
         { t: songSec, hz: frame.hz, db: frame.db },
         outputs,
@@ -580,12 +701,34 @@ export function PracticePage({
       );
 
       const isVoice = gate.label === 'voice' && frame.hz > 0;
-      const midiFloat = isVoice ? hzToMidi(frame.hz, cfg.a4) : NaN;
+      const rawMidi = isVoice ? hzToMidi(frame.hz, cfg.a4) : NaN;
+      const targetInfo = targetNoteRef.current;
+      const autoK = octaveTrackerRef.current.process({
+        mode: 'auto',
+        tSec: songSec,
+        rawMidi: Number.isFinite(rawMidi) ? rawMidi : null,
+        targetMidi: targetInfo.midi,
+        noteKey: targetInfo.key,
+      });
+      if (autoK !== autoOctaveKRef.current) {
+        autoOctaveKRef.current = autoK;
+        setAutoOctaveK(autoK);
+      }
 
-      if (isVoice && Number.isFinite(midiFloat)) {
-        setSungMidi(midiFloat);
+      const activeK: OctaveShiftK =
+        cfg.singOctaveMode === 'none'
+          ? 0
+          : cfg.singOctaveMode === 'up'
+            ? 1
+            : autoK;
+      const shiftedHz = isVoice ? frame.hz * Math.pow(2, activeK) : 0;
+      const shiftedMidi =
+        isVoice && Number.isFinite(rawMidi) ? rawMidi + 12 * activeK : NaN;
+
+      if (isVoice && Number.isFinite(shiftedMidi)) {
+        setSungMidi(shiftedMidi);
         const nowMs = performance.now();
-        recentVoiceRef.current.push({ wallMs: nowMs, hz: frame.hz });
+        recentVoiceRef.current.push({ wallMs: nowMs, hz: shiftedHz });
         recentVoiceRef.current = recentVoiceRef.current
           .filter((item) => nowMs - item.wallMs <= 250)
           .slice(-3);
@@ -613,7 +756,8 @@ export function PracticePage({
         if (!last || songSec > last.t) {
           samples.push({
             t: songSec,
-            hz: isVoice ? frame.hz : 0,
+            rawHz: isVoice ? frame.hz : 0,
+            autoK,
             voiced: isVoice,
           });
           setSungVersion((v) => v + 1);
@@ -623,7 +767,7 @@ export function PracticePage({
           const conf = confusionRef.current.push({
             t: songSec,
             label: gate.label,
-            midi: midiFloat,
+            midi: shiftedMidi,
             pitchStd: gate.pitchStd,
             hasOutput: gate.hasOutput,
             isMetro: gate.isMetro,
@@ -649,6 +793,7 @@ export function PracticePage({
           setLiveDb(null);
           setSungMidi(null);
           setCurrentCents(null);
+          autoMicAttemptedRef.current = false;
         },
       });
       setMicActive(true);
@@ -668,12 +813,89 @@ export function PracticePage({
   }, [micController, handleMicFrame]);
 
   const stopMic = useCallback(async () => {
-    await micController.stop();
+    await micController.stop().catch(() => {});
     setMicActive(false);
     setLiveDb(null);
     setSungMidi(null);
     setCurrentCents(null);
   }, [micController]);
+
+  // 背景切回前景時安全復原音訊與麥克風狀態
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') {
+        return;
+      }
+      void (async () => {
+        try {
+          micController.notifyEndedIfNeeded();
+          const ctx = engine.audioContext;
+          if (!ctx) {
+            return;
+          }
+          const ctxState = ctx.state as string;
+          if (ctxState === 'closed') {
+            const shouldReopenMic =
+              micController.isActive || micActiveRef.current;
+            lastPosRef.current = {
+              ...lastPosRef.current,
+              playing: false,
+            };
+            playingRef.current = false;
+            setPlaying(false);
+            await micController.stop().catch(() => {});
+            setMicActive(false);
+            await engine.init();
+            if (shouldReopenMic && !unmountedRef.current) {
+              const reopened = await startMic();
+              if (!reopened) {
+                autoMicAttemptedRef.current = false;
+              }
+            }
+          } else if (ctxState === 'suspended' || ctxState === 'interrupted') {
+            engine.pause();
+            lastPosRef.current = {
+              ...lastPosRef.current,
+              playing: false,
+            };
+            playingRef.current = false;
+            setPlaying(false);
+          }
+        } catch {
+          // 切回前景絕不向外拋出例外
+        }
+      })();
+    };
+
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [engine, micController, startMic]);
+
+  const getDiagnostics = useCallback((): PracticeDiagnosticsSnapshot => {
+    const nowWallMs = performance.now();
+    recentDetectedRef.current = recentDetectedRef.current.filter(
+      (item) => nowWallMs - item.wallMs <= 1000,
+    );
+    const latest =
+      recentDetectedRef.current[recentDetectedRef.current.length - 1] ?? null;
+    const micDiag: MicDiagnostics = micController.getDiagnostics();
+    return {
+      mic: micDiag,
+      outputLatencySec: engine.outputLatency,
+      recentHz: latest ? latest.hz : null,
+      recentMidi: latest ? latest.midi : null,
+      singOctaveMode: settingsRef.current.singOctaveMode,
+      activeOctaveK:
+        settingsRef.current.singOctaveMode === 'none'
+          ? 0
+          : settingsRef.current.singOctaveMode === 'up'
+            ? 1
+            : autoOctaveKRef.current,
+      standalone: isStandaloneMode(),
+    };
+  }, [engine, micController]);
 
   async function handleToggleMic() {
     if (micActive) {
@@ -956,41 +1178,6 @@ export function PracticePage({
     [engine, getExtrapolatedSec],
   );
 
-  // 直立手機提示：不渲染練唱內容
-  if (isPortraitPhone) {
-    return (
-      <div className="practice-portrait-guard">
-        <svg
-          className="rotate-phone-icon"
-          width="56"
-          height="56"
-          viewBox="0 0 56 56"
-          fill="none"
-          aria-hidden="true"
-        >
-          <rect
-            x="16"
-            y="8"
-            width="24"
-            height="40"
-            rx="4"
-            stroke="currentColor"
-            strokeWidth="2.5"
-          />
-          <circle cx="28" cy="42" r="1.8" fill="currentColor" />
-          <path
-            d="M44 20c3 4 4 9 2 14m0 0-4-1.5m4 1.5 1.5-4"
-            stroke="#4ca4ff"
-            strokeWidth="2.2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-        <p className="rotate-phone-text">請將手機轉成橫放</p>
-      </div>
-    );
-  }
-
   const win = exercise ? passWindow(exercise, sec) : null;
   currentPhaseRef.current = win?.phase ?? 'sing';
   const currentKeyIndex = win?.keyIndex ?? 0;
@@ -1000,36 +1187,30 @@ export function PracticePage({
   const tonicMidi = activeKeyBlock?.tonicMidi ?? settings.startTonic;
   const clef = clefForRange(rangeLow, rangeHigh);
 
-  // 計算鋼琴高度上下限與樂譜可用行數
-  const fallbackWsH = isTablet
-    ? Math.max(400, viewport.height - 172)
-    : Math.max(240, viewport.height - 82);
-  const wsH = workspaceHeight > 0 ? workspaceHeight : fallbackWsH;
-  const handleH = handleBarHeight(isTablet);
+  // 依實際可用視窗高度分配各區塊尺寸
+  const collapsedPref: PianoCollapsedPref = forceExpandPiano
+    ? 'expanded'
+    : settings.pianoCollapsed
+      ? 'collapsed'
+      : 'auto';
+  const vpLayout = computeViewportLayout({
+    height: viewport.height,
+    width: viewport.width,
+    device,
+    collapsedPref,
+    preferredPianoHeight: settings.pianoHeight,
+    overridePianoHeight: dragHeight,
+    safePaddingY: safePadding?.y,
+    safePaddingX: safePadding?.x,
+  });
+
+  const handleH = vpLayout.handleHeight;
   const miniH = miniPianoHeight(isTablet);
-  const centsH = isTablet ? 37 : 24;
-  const sheetPadY = isTablet ? 16 : 4;
-  const wsGaps = isTablet ? 20 : 8;
-  const minLineH = minScoreLineHeight(isTablet);
-  const minScorePaperH = centsH + sheetPadY + minLineH;
-  const maxPianoH = Math.max(40, wsH - handleH - wsGaps - minScorePaperH);
-
-  const savedPianoH = clampPianoHeight(
-    settings.pianoHeight ?? defaultPianoHeight(isTablet),
-    maxPianoH,
-  );
-  const isPianoCollapsed = dragHeight !== null ? false : settings.pianoCollapsed;
-  const effectivePianoH =
-    dragHeight !== null ? dragHeight : isPianoCollapsed ? miniH : savedPianoH;
-
-  const scoreAreaH = Math.max(
-    minLineH,
-    wsH - handleH - wsGaps - effectivePianoH - centsH - sheetPadY,
-  );
-  const maxLines = scoreAreaH >= minLineH * 2 ? 2 : 1;
-  const jianpuH = isTablet ? 52 : 24;
-  const lineTotalH = Math.floor(scoreAreaH / maxLines);
-  const staffHeight = Math.max(72, lineTotalH - jianpuH);
+  const maxPianoH = vpLayout.maxPianoHeight;
+  const isPianoCollapsed = vpLayout.collapsed;
+  const effectivePianoH = vpLayout.pianoHeight;
+  const maxLines = vpLayout.lineCount;
+  const staffHeight = vpLayout.staffHeight;
 
   const lines = useMemo(() => {
     if (!exercise) return [];
@@ -1080,6 +1261,79 @@ export function PracticePage({
     return currIdx === 0 ? [curr, previewLine] : [previewLine, curr];
   }, [exercise, sec, maxLines, settings.repeatsPerKey]);
 
+  const sungByLine = useMemo(() => {
+    const raw = rawSungRef.current;
+    if (raw.length === 0 || lines.length === 0) {
+      return lines.map(() => EMPTY_SUNG);
+    }
+    const mode = settings.singOctaveMode;
+    return lines.map((line) => {
+      const padStart = line.start - 0.5;
+      const padEnd = line.end + 0.5;
+      const times: number[] = [];
+      const pitches: number[] = [];
+      const voiced: boolean[] = [];
+      for (const pt of raw) {
+        if (pt.t < padStart) continue;
+        if (pt.t > padEnd) break;
+        const k: OctaveShiftK =
+          mode === 'none' ? 0 : mode === 'up' ? 1 : pt.autoK;
+        times.push(pt.t);
+        pitches.push(
+          pt.rawHz > 0 ? hzToMidi(pt.rawHz, settings.a4) + 12 * k : NaN,
+        );
+        voiced.push(pt.voiced);
+      }
+      if (times.length === 0) return EMPTY_SUNG;
+      const curved = singingCurve(times, pitches, voiced);
+      const pts: SungPoint[] = [];
+      for (let i = 0; i < curved.x.length; i++) {
+        pts.push({ t: curved.x[i]!, midi: curved.y[i]! });
+      }
+      return pts;
+    });
+  }, [lines, sungVersion, settings.a4, settings.singOctaveMode]);
+
+  // 直立手機提示：所有 hooks 必須在提早 return 之前呼叫完成
+  if (isPortraitPhone) {
+    return (
+      <div className="practice-portrait-guard">
+        <svg
+          className="rotate-phone-icon"
+          width="56"
+          height="56"
+          viewBox="0 0 56 56"
+          fill="none"
+          aria-hidden="true"
+        >
+          <rect
+            x="16"
+            y="8"
+            width="24"
+            height="40"
+            rx="4"
+            stroke="currentColor"
+            strokeWidth="2.5"
+          />
+          <circle cx="28" cy="42" r="1.8" fill="currentColor" />
+          <path
+            d="M44 20c3 4 4 9 2 14m0 0-4-1.5m4 1.5 1.5-4"
+            stroke="#4ca4ff"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+        <p className="rotate-phone-text">請將手機轉成橫放</p>
+      </div>
+    );
+  }
+
+  function handleDismissIosHint() {
+    markIosInstallHintDismissed();
+    setIosHintVisible(false);
+  }
+
   const currentLineInfo = lines.find((l) => l.isCurrent);
 
   const countIn = exercise
@@ -1087,6 +1341,7 @@ export function PracticePage({
     : { active: false, dots: [] };
 
   let targetMidi: number | null = null;
+  let targetNoteKey: string | null = null;
   const renderedLines = lines.map((line) => {
     const lineKeyBlock = exercise?.keys[line.keyIndex];
     const lineKey = lineKeyBlock?.key ?? activeKey;
@@ -1124,7 +1379,9 @@ export function PracticePage({
 
     const activeNoteIdx = line.isCurrent ? currentNoteIndex(glyphs, sec) : -1;
     if (line.isCurrent && activeNoteIdx >= 0) {
-      targetMidi = glyphs[activeNoteIdx]!.midi;
+      const activeGlyph = glyphs[activeNoteIdx]!;
+      targetMidi = activeGlyph.midi;
+      targetNoteKey = `${line.keyIndex}:${line.pass}:${line.phase}:${activeGlyph.start.toFixed(4)}:${activeGlyph.midi}`;
     }
 
     const showPlayhead =
@@ -1182,34 +1439,15 @@ export function PracticePage({
   });
 
   targetMidiRef.current = targetMidi;
+  targetNoteRef.current = { midi: targetMidi, key: targetNoteKey };
 
-  const sungByLine = useMemo(() => {
-    const raw = rawSungRef.current;
-    if (raw.length === 0 || lines.length === 0) {
-      return lines.map(() => EMPTY_SUNG);
-    }
-    return lines.map((line) => {
-      const padStart = line.start - 0.5;
-      const padEnd = line.end + 0.5;
-      const times: number[] = [];
-      const pitches: number[] = [];
-      const voiced: boolean[] = [];
-      for (const pt of raw) {
-        if (pt.t < padStart) continue;
-        if (pt.t > padEnd) break;
-        times.push(pt.t);
-        pitches.push(pt.hz > 0 ? hzToMidi(pt.hz, settings.a4) : NaN);
-        voiced.push(pt.voiced);
-      }
-      if (times.length === 0) return EMPTY_SUNG;
-      const curved = singingCurve(times, pitches, voiced);
-      const pts: SungPoint[] = [];
-      for (let i = 0; i < curved.x.length; i++) {
-        pts.push({ t: curved.x[i]!, midi: curved.y[i]! });
-      }
-      return pts;
-    });
-  }, [lines, sungVersion, settings.a4]);
+  const activeShiftK: OctaveShiftK =
+    settings.singOctaveMode === 'none'
+      ? 0
+      : settings.singOctaveMode === 'up'
+        ? 1
+        : autoOctaveK;
+  const octaveTag = formatOctaveShiftBadge(activeShiftK);
 
   function handleDrawerPointerDown(e: React.PointerEvent<HTMLDivElement>) {
     e.preventDefault();
@@ -1218,12 +1456,16 @@ export function PracticePage({
     } catch {
       // 忽略部分環境不支援 setPointerCapture 的情況
     }
+    const expandedFallback = clampPianoHeight(
+      settings.pianoHeight ?? defaultPianoHeight(isTablet),
+      maxPianoH,
+    );
     handleDragRef.current = {
       pointerId: e.pointerId,
       startY: e.clientY,
       startX: e.clientX,
-      savedHeight: savedPianoH,
-      collapsed: settings.pianoCollapsed,
+      savedHeight: isPianoCollapsed ? expandedFallback : effectivePianoH,
+      collapsed: isPianoCollapsed,
       maxDist: 0,
     };
   }
@@ -1263,10 +1505,27 @@ export function PracticePage({
       defaultHeight: defaultPianoHeight(isTablet),
       maxHeight: maxPianoH,
     });
-    onUpdateSettings({
-      pianoCollapsed: result.collapsed,
-      pianoHeight: result.height,
-    });
+    if (!result.collapsed && autoLayout.autoCollapsed) {
+      // 空間不足自動收合時，使用者手動展開改為單行並把剩餘空間交給鋼琴
+      setForceExpandPiano(true);
+      onUpdateSettings({
+        pianoCollapsed: false,
+        pianoHeight: result.height,
+      });
+    } else if (result.collapsed && forceExpandPiano) {
+      // 由手動強制展開再點一下收合時，回到依可用空間自動決定
+      setForceExpandPiano(false);
+      onUpdateSettings({
+        pianoCollapsed: false,
+        pianoHeight: result.height,
+      });
+    } else {
+      setForceExpandPiano(false);
+      onUpdateSettings({
+        pianoCollapsed: result.collapsed,
+        pianoHeight: result.height,
+      });
+    }
   }
 
   const selectedCount = keySelection.selectedIndices.length;
@@ -1280,9 +1539,16 @@ export function PracticePage({
         : 1;
 
   return (
-    <div className={`practice-page ${isTablet ? 'is-tablet' : 'is-phone'}`}>
+    <div
+      ref={pageRef}
+      className={`practice-page ${isTablet ? 'is-tablet' : 'is-phone'}`}
+      style={{ height: `${vpLayout.viewportHeight}px` }}
+    >
       {/* 1. 標題列 */}
-      <header className="practice-header">
+      <header
+        className="practice-header"
+        style={{ height: `${vpLayout.headerHeight}px` }}
+      >
         <button
           type="button"
           className="practice-back-btn"
@@ -1365,8 +1631,35 @@ export function PracticePage({
       </header>
 
       {/* 2. 主工作區：譜面紙張 + 把手列 + 對音鋼琴 */}
-      <div className="practice-workspace" ref={workspaceRef}>
-        <section className="sheet-paper" aria-label="譜面">
+      <div
+        className="practice-workspace"
+        ref={workspaceRef}
+        style={{ height: `${vpLayout.workspaceHeight}px` }}
+      >
+        <section
+          className="sheet-paper"
+          style={{ height: `${vpLayout.sheetPaperHeight}px` }}
+          aria-label="譜面"
+        >
+          {iosHintVisible && (
+            <div
+              className={`ios-install-banner ${iosHintFading ? 'is-fading' : ''}`}
+              role="status"
+            >
+              <span className="ios-install-banner-text">
+                用 Safari「分享 → 加入主畫面」打開，可全螢幕練唱
+              </span>
+              <button
+                type="button"
+                className="ios-install-banner-close"
+                aria-label="關閉提示"
+                onClick={handleDismissIosHint}
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
           {(errorMsg || buildError) && (
             <div className="sheet-error" role="alert">
               {errorMsg ?? buildError}
@@ -1408,15 +1701,24 @@ export function PracticePage({
             </div>
           )}
 
-          <CentsBar cents={currentCents} isTablet={isTablet} />
+          <CentsBar
+            cents={currentCents}
+            isTablet={isTablet}
+            height={vpLayout.centsHeight}
+          />
 
-          <div className="sheet-score-area" ref={scoreAreaRef}>
+          <div
+            className="sheet-score-area"
+            ref={scoreAreaRef}
+            style={{ height: `${vpLayout.scoreAreaHeight}px` }}
+          >
             {renderedLines.map((item, lineIdx) => (
               <div
                 key={`score-line-${lineIdx}`}
                 className={`score-line ${
                   item.line.isCurrent ? 'is-current' : 'is-preview'
                 }`}
+                style={{ height: `${vpLayout.lineHeight}px` }}
               >
                 {/* 目前音淡藍色直條（僅出現在正在唱的那一行） */}
                 {item.activeNoteX !== null && (
@@ -1446,6 +1748,8 @@ export function PracticePage({
                   isTablet={isTablet}
                   previewLabel={item.line.isCurrent ? null : item.lineLabel}
                   lineLabel={item.lineLabel}
+                  octaveTag={item.line.isCurrent ? octaveTag : null}
+                  height={vpLayout.jianpuHeight}
                 />
 
                 <StaffView
@@ -1492,7 +1796,9 @@ export function PracticePage({
           </span>
           <span className="piano-handle-text">
             {isPianoCollapsed
-              ? '對音鋼琴 ▸ 已收合（點一下展開，或往上拖）'
+              ? vpLayout.autoCollapsed
+                ? '對音鋼琴 ▸ 空間不足已收合（點一下展開）'
+                : '對音鋼琴 ▸ 已收合（點一下展開，或往上拖）'
               : isTablet
                 ? '對音鋼琴 ▾ 拖動調整高度 · 點一下收合'
                 : '對音鋼琴 ▾'}
@@ -1531,6 +1837,7 @@ export function PracticePage({
         boundaryToast={boundaryToast}
         pianoDuringSing={settings.pianoDuringSing}
         isTablet={isTablet}
+        height={vpLayout.transportHeight}
         getSec={getExtrapolatedSec}
         onPrevKey={handlePrevKey}
         onPlayPause={handlePlayPause}
@@ -1556,6 +1863,7 @@ export function PracticePage({
         liveDb={liveDb}
         onUpdateSettings={onUpdateSettings}
         onEnsureMicForCalibration={startMic}
+        getDiagnostics={getDiagnostics}
         onClose={() => setSettingsOpen(false)}
       />
     </div>

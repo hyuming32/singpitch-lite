@@ -8,6 +8,7 @@ import type {
 } from './pitch.worker';
 import PitchWorker from './pitch.worker.ts?worker';
 import type { PitchFeatures } from './pitchTracker';
+import { resolveEffectiveSampleRate } from './sampleRate';
 
 export interface MicPitchFrame {
   /** AudioContext 時間軸秒數 */
@@ -17,6 +18,16 @@ export interface MicPitchFrame {
   /** 音量（dBFS） */
   db: number;
   features: PitchFeatures;
+}
+
+export interface MicDiagnostics {
+  ctxSampleRate: number | null;
+  trackSampleRate: number | null;
+  workletSampleRate: number | null;
+  measuredSamplesPerSec: number | null;
+  effectiveRate: number | null;
+  rateCorrected: boolean;
+  inputLatencySec: number;
 }
 
 export interface MicStartOptions {
@@ -42,6 +53,7 @@ const loadedWorkletCtx = new WeakSet<AudioContext>();
 export class MicController {
   private readonly engine: AudioEngine;
   private stream: MediaStream | null = null;
+  private track: MediaStreamTrack | null = null;
   private source: MediaStreamAudioSourceNode | null = null;
   private captureNode: AudioWorkletNode | null = null;
   private silentGain: GainNode | null = null;
@@ -49,6 +61,18 @@ export class MicController {
   private active = false;
   private _inputLatencySec = 0;
   private currentGateDb = -45;
+  private activeRate = 48000;
+  private rateWindowStartMs: number | null = null;
+  private rateWindowSamples = 0;
+  private diagnostics: MicDiagnostics = {
+    ctxSampleRate: null,
+    trackSampleRate: null,
+    workletSampleRate: null,
+    measuredSamplesPerSec: null,
+    effectiveRate: null,
+    rateCorrected: false,
+    inputLatencySec: 0,
+  };
   private onFrameCb: ((frame: MicPitchFrame) => void) | null = null;
   private onEndedCb: (() => void) | null = null;
 
@@ -62,6 +86,27 @@ export class MicController {
 
   get inputLatencySec(): number {
     return this._inputLatencySec;
+  }
+
+  /** 取得麥克風取樣率與延遲診斷資訊 */
+  getDiagnostics(): MicDiagnostics {
+    return { ...this.diagnostics };
+  }
+
+  /** 檢查麥克風 track 是否已被系統關閉 */
+  isTrackEnded(): boolean {
+    return Boolean(this.track && this.track.readyState === 'ended');
+  }
+
+  /** 若 track 已結束但尚未觸發回呼，安全地清理並通知上層 */
+  notifyEndedIfNeeded(): boolean {
+    if (this.active && this.isTrackEnded()) {
+      const cb = this.onEndedCb;
+      void this.stop();
+      cb?.();
+      return true;
+    }
+    return false;
   }
 
   setGateDb(gateDb: number): void {
@@ -130,14 +175,36 @@ export class MicController {
         loadedWorkletCtx.add(ctx);
       }
 
-      const track = stream.getAudioTracks()[0];
+      const track = stream.getAudioTracks()[0] ?? null;
       this._inputLatencySec = readTrackInputLatencySec(track);
+      const trackSettings = track?.getSettings?.() as
+        | (MediaTrackSettings & { sampleRate?: unknown })
+        | undefined;
+      const trackSampleRate =
+        typeof trackSettings?.sampleRate === 'number' &&
+        Number.isFinite(trackSettings.sampleRate)
+          ? trackSettings.sampleRate
+          : null;
+
+      this.activeRate = ctx.sampleRate;
+      this.rateWindowStartMs = null;
+      this.rateWindowSamples = 0;
+      this.diagnostics = {
+        ctxSampleRate: ctx.sampleRate,
+        trackSampleRate,
+        workletSampleRate: null,
+        measuredSamplesPerSec: null,
+        effectiveRate: ctx.sampleRate,
+        rateCorrected: false,
+        inputLatencySec: this._inputLatencySec,
+      };
 
       if (track) {
         track.addEventListener('ended', () => {
           if (this.active) {
+            const cb = this.onEndedCb;
             void this.stop();
-            this.onEndedCb?.();
+            cb?.();
           }
         });
       }
@@ -145,7 +212,7 @@ export class MicController {
       const worker = new PitchWorker();
       const initMsg: PitchWorkerInMessage = {
         type: 'init',
-        rate: ctx.sampleRate,
+        rate: this.activeRate,
         gateDb: this.currentGateDb,
       };
       worker.postMessage(initMsg);
@@ -172,7 +239,12 @@ export class MicController {
       silentGain.gain.value = 0;
 
       captureNode.port.onmessage = (
-        ev: MessageEvent<{ type?: string; samples?: Float32Array; frame?: number }>,
+        ev: MessageEvent<{
+          type?: string;
+          samples?: Float32Array;
+          frame?: number;
+          sampleRate?: number;
+        }>,
       ) => {
         const data = ev.data;
         if (
@@ -182,6 +254,39 @@ export class MicController {
           this.worker &&
           this.active
         ) {
+          if (
+            typeof data.sampleRate === 'number' &&
+            Number.isFinite(data.sampleRate)
+          ) {
+            this.diagnostics.workletSampleRate = data.sampleRate;
+          }
+
+          const nowMs = performance.now();
+          if (this.rateWindowStartMs === null) {
+            this.rateWindowStartMs = nowMs;
+            this.rateWindowSamples = 0;
+          }
+          this.rateWindowSamples += data.samples.length;
+          const elapsedMs = nowMs - this.rateWindowStartMs;
+          if (elapsedMs >= 1000) {
+            const measured = Math.round((this.rateWindowSamples * 1000) / elapsedMs);
+            this.rateWindowStartMs = nowMs;
+            this.rateWindowSamples = 0;
+            this.diagnostics.measuredSamplesPerSec = measured;
+
+            const resolution = resolveEffectiveSampleRate(this.activeRate, measured);
+            if (resolution.corrected) {
+              this.activeRate = resolution.effectiveRate;
+              this.diagnostics.effectiveRate = resolution.effectiveRate;
+              this.diagnostics.rateCorrected = true;
+              const rateMsg: PitchWorkerInMessage = {
+                type: 'rate',
+                rate: resolution.effectiveRate,
+              };
+              this.worker.postMessage(rateMsg);
+            }
+          }
+
           const msg: PitchWorkerInMessage = {
             type: 'audio',
             samples: data.samples,
@@ -196,6 +301,7 @@ export class MicController {
       silentGain.connect(ctx.destination);
 
       this.stream = stream;
+      this.track = track;
       this.source = source;
       this.captureNode = captureNode;
       this.silentGain = silentGain;
@@ -203,7 +309,11 @@ export class MicController {
       this.active = true;
     } catch (err) {
       for (const tr of stream.getTracks()) {
-        tr.stop();
+        try {
+          tr.stop();
+        } catch {
+          // 忽略錯誤
+        }
       }
       this.engine.setAudioSession('playback');
       throw err;
@@ -213,6 +323,7 @@ export class MicController {
   async stop(): Promise<void> {
     this.active = false;
     this._inputLatencySec = 0;
+    this.track = null;
 
     if (this.captureNode) {
       try {
@@ -221,28 +332,48 @@ export class MicController {
         // 忽略已關閉的 port
       }
       this.captureNode.port.onmessage = null;
-      this.captureNode.disconnect();
+      try {
+        this.captureNode.disconnect();
+      } catch {
+        // 忽略斷線錯誤
+      }
       this.captureNode = null;
     }
 
     if (this.source) {
-      this.source.disconnect();
+      try {
+        this.source.disconnect();
+      } catch {
+        // 忽略斷線錯誤
+      }
       this.source = null;
     }
 
     if (this.silentGain) {
-      this.silentGain.disconnect();
+      try {
+        this.silentGain.disconnect();
+      } catch {
+        // 忽略斷線錯誤
+      }
       this.silentGain = null;
     }
 
     if (this.worker) {
-      this.worker.terminate();
+      try {
+        this.worker.terminate();
+      } catch {
+        // 忽略 worker 終止錯誤
+      }
       this.worker = null;
     }
 
     if (this.stream) {
       for (const tr of this.stream.getTracks()) {
-        tr.stop();
+        try {
+          tr.stop();
+        } catch {
+          // 忽略 track 停止錯誤
+        }
       }
       this.stream = null;
     }

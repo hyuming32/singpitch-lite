@@ -58,6 +58,7 @@ button:disabled {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  height: -webkit-fill-available;
   height: 100dvh;
   overflow: hidden;
   background-color: var(--bg);
@@ -1166,13 +1167,17 @@ button:disabled {
 .practice-portrait-guard {
   flex: 1;
   height: 100vh;
+  height: -webkit-fill-available;
   height: 100dvh;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 14px;
-  padding: 24px;
+  padding: max(24px, env(safe-area-inset-top))
+    max(24px, env(safe-area-inset-right))
+    max(24px, env(safe-area-inset-bottom))
+    max(24px, env(safe-area-inset-left));
   background-color: var(--bg);
   color: var(--text);
   text-align: center;
@@ -1191,6 +1196,7 @@ button:disabled {
 .practice-page {
   flex: 1;
   height: 100vh;
+  height: -webkit-fill-available;
   height: 100dvh;
   display: flex;
   flex-direction: column;
@@ -1198,13 +1204,16 @@ button:disabled {
   background-color: var(--bg);
   padding: max(4px, env(safe-area-inset-top))
     max(48px, env(safe-area-inset-right))
-    max(10px, env(safe-area-inset-bottom))
+    max(4px, env(safe-area-inset-bottom))
     max(48px, env(safe-area-inset-left));
   gap: 4px;
 }
 
 .practice-page.is-tablet {
-  padding: 12px 24px max(16px, env(safe-area-inset-bottom));
+  padding: max(12px, env(safe-area-inset-top))
+    max(24px, env(safe-area-inset-right))
+    max(16px, env(safe-area-inset-bottom))
+    max(24px, env(safe-area-inset-left));
   gap: 10px;
 }
 
@@ -1522,7 +1531,7 @@ button:disabled {
   color: #2c2c2a;
   border-radius: 12px;
   padding: 2px 0;
-  flex: 1;
+  flex: 0 0 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -1534,16 +1543,23 @@ button:disabled {
 }
 
 .sheet-error {
-  padding: 2px 12px;
+  position: absolute;
+  top: 4px;
+  left: 12px;
+  right: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background-color: rgba(246, 244, 238, 0.96);
   color: #c62828;
   font-size: 12px;
   font-weight: 600;
+  z-index: 14;
 }
 
 /* cents 色條 */
 .cents-bar {
-  height: 24px;
-  padding: 2px 14px 0;
+  height: 22px;
+  padding: 1px 14px 0;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -1688,11 +1704,18 @@ button:disabled {
   height: 52px;
 }
 
-.jianpu-mode-tag {
+.jianpu-tag-row {
   position: absolute;
   left: 10px;
   top: 50%;
   transform: translateY(-50%);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.jianpu-mode-tag {
   font-size: 10px;
   font-weight: 600;
   color: #5f5e5a;
@@ -1704,9 +1727,24 @@ button:disabled {
   font-weight: 700;
 }
 
-.jianpu-strip.is-tablet .jianpu-mode-tag {
+.jianpu-octave-tag {
+  font-size: 10px;
+  font-weight: 600;
+  color: #7b7970;
+  white-space: nowrap;
+}
+
+.jianpu-strip.is-tablet .jianpu-tag-row {
   left: 14px;
+  gap: 6px;
+}
+
+.jianpu-strip.is-tablet .jianpu-mode-tag {
   font-size: 13px;
+}
+
+.jianpu-strip.is-tablet .jianpu-octave-tag {
+  font-size: 12px;
 }
 
 .jianpu-strip-item {
@@ -2506,4 +2544,233 @@ button:disabled {
 
 .calib-msg.is-error {
   color: var(--danger);
+}
+
+/* iOS 非主畫面模式提示橫幅（疊於樂譜面板上方，不佔用版面高度） */
+.ios-install-banner {
+  position: absolute;
+  top: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100% - 24px);
+  padding: 4px 8px 4px 12px;
+  border-radius: 999px;
+  background-color: rgba(23, 27, 36, 0.92);
+  border: 1px solid rgba(76, 164, 255, 0.5);
+  color: #edf0f7;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.25;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+  z-index: 16;
+  opacity: 1;
+  transition: opacity 350ms ease;
+}
+
+.ios-install-banner.is-fading {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ios-install-banner-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ios-install-banner-close {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background-color: rgba(255, 255, 255, 0.14);
+  color: #edf0f7;
+  font-size: 11px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.segmented-group-wrap .seg-btn {
+  white-space: normal;
+  line-height: 1.25;
+  padding: 6px 6px;
+  font-size: 12px;
+}
+
+/* ErrorBoundary 深色復原畫面 */
+.error-boundary-screen {
+  min-height: 100vh;
+  min-height: 100dvh;
+  width: 100%;
+  background-color: var(--bg);
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.error-boundary-card {
+  width: 100%;
+  max-width: 420px;
+  background-color: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 24px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  text-align: center;
+}
+
+.error-boundary-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--danger);
+}
+
+.error-boundary-msg {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  word-break: break-word;
+}
+
+.error-boundary-reload-btn {
+  margin-top: 6px;
+  min-height: 44px;
+  padding: 0 18px;
+  border-radius: 10px;
+  background-color: var(--blue);
+  color: #0d1522;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+/* ⚙ 面板診斷資訊可折疊區 */
+.diag-section {
+  background-color: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.diag-toggle-btn {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.diag-panel {
+  border-top: 1px solid var(--border);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.diag-grid {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px 12px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.diag-grid dt {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.diag-grid dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  word-break: break-all;
+}
+
+.diag-errlog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.diag-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.diag-action-btn {
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background-color: var(--panel);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.diag-action-btn.is-primary {
+  border-color: var(--blue);
+  background-color: var(--blue-bg);
+  color: var(--blue-text);
+}
+
+.diag-empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.diag-errlog-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.diag-errlog-item {
+  background-color: #141820;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.diag-errlog-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+
+.diag-errlog-msg {
+  color: var(--danger);
+  word-break: break-word;
 }

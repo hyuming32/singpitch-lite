@@ -1,6 +1,7 @@
 import type { Exercise, ExerciseOptions } from '../core/exercise';
 import type { JianpuMode } from '../core/jianpu';
 import { RANGES } from '../core/notes';
+import type { SingOctaveMode } from '../mic/octaveShift';
 import { displayNoteName } from '../ui/noteLabel';
 import { BUILTIN_PATTERNS, parseJianpu, type PatternDef } from '../core/patterns';
 
@@ -63,6 +64,7 @@ export interface PracticeSettings {
   noiseGateDb: number;
   latencyOffsetMs: number;
   hideSpeakerHint: boolean;
+  singOctaveMode: SingOctaveMode;
 }
 
 export const DEFAULT_SETTINGS: PracticeSettings = {
@@ -91,6 +93,7 @@ export const DEFAULT_SETTINGS: PracticeSettings = {
   noiseGateDb: -45,
   latencyOffsetMs: 0,
   hideSpeakerHint: false,
+  singOctaveMode: 'auto',
 };
 
 function clampInt(value: unknown, min: number, max: number, fallback: number): number {
@@ -161,6 +164,13 @@ export function sanitizeSettings(raw: unknown): PracticeSettings {
       ? obj.repeatsPerKey
       : DEFAULT_SETTINGS.repeatsPerKey;
 
+  const singOctaveMode: SingOctaveMode =
+    obj.singOctaveMode === 'auto' ||
+    obj.singOctaveMode === 'up' ||
+    obj.singOctaveMode === 'none'
+      ? obj.singOctaveMode
+      : DEFAULT_SETTINGS.singOctaveMode;
+
   return {
     patternId,
     startTonic: clampInt(obj.startTonic, 24, 96, DEFAULT_SETTINGS.startTonic),
@@ -214,6 +224,7 @@ export function sanitizeSettings(raw: unknown): PracticeSettings {
       obj.hideSpeakerHint,
       DEFAULT_SETTINGS.hideSpeakerHint,
     ),
+    singOctaveMode,
   };
 }
 

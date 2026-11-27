@@ -59,7 +59,7 @@ export function StaffView({
   isTablet,
 }: StaffViewProps) {
   const safeWidth = Math.max(120, width);
-  const safeHeight = Math.max(80, height);
+  const safeHeight = Math.max(40, height);
   const rightEdge = Math.max(leftPad + 1, safeWidth - rightPad);
 
   const { stepY, lineSpacing, baseY, chordY } = metrics;

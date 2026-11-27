@@ -24,6 +24,10 @@ type WorkletOutMessage =
 const UNSUPPORTED_MSG =
   '此瀏覽器不支援 AudioWorklet，請用 https 開啟或更新瀏覽器';
 
+function isSuspendedOrInterrupted(state: string): boolean {
+  return state === 'suspended' || state === 'interrupted';
+}
+
 export class AudioEngine {
   private ctx: AudioContext | null = null;
   private node: AudioWorkletNode | null = null;
@@ -38,8 +42,19 @@ export class AudioEngine {
   private readonly posCallbacks = new Set<PositionCallback>();
   private readonly endedCallbacks = new Set<EndedCallback>();
 
-  /** 初始化 AudioContext 與 AudioWorkletNode（可重複呼叫） */
+  /** 初始化 AudioContext 與 AudioWorkletNode（可重複呼叫，closed 時自動重建） */
   async init(): Promise<void> {
+    if (this.ctx && this.ctx.state === 'closed') {
+      try {
+        this.node?.disconnect();
+      } catch {
+        // 忽略已關閉節點的斷線錯誤
+      }
+      this.node = null;
+      this.ctx = null;
+      this.initPromise = null;
+      this._ctxToSongOffsetSec = null;
+    }
     if (this.node && this.ctx) {
       return;
     }
@@ -143,13 +158,17 @@ export class AudioEngine {
     if (nav.audioSession) {
       nav.audioSession.type = this.audioSessionType;
     }
-    if (this.ctx && this.ctx.state === 'suspended') {
-      await this.ctx.resume();
+    if (this.ctx && isSuspendedOrInterrupted(this.ctx.state)) {
+      await this.ctx.resume().catch(() => {});
     }
   }
 
   private post(msg: WorkletInMessage): void {
-    this.node?.port.postMessage(msg);
+    try {
+      this.node?.port.postMessage(msg);
+    } catch {
+      // 忽略 worklet port 已關閉錯誤
+    }
   }
 
   private sendCompiledExercise(): void {
@@ -176,17 +195,19 @@ export class AudioEngine {
   }
 
   play(): void {
-    if (this.ctx && this.ctx.state === 'suspended') {
-      void this.ctx.resume();
+    if (this.ctx && isSuspendedOrInterrupted(this.ctx.state)) {
+      void this.ctx.resume().catch(() => {});
     }
     this.post({ type: 'play' });
   }
 
   pause(): void {
+    this._ctxToSongOffsetSec = null;
     this.post({ type: 'pause' });
   }
 
   stop(): void {
+    this._ctxToSongOffsetSec = null;
     this.post({ type: 'stop' });
   }
 
@@ -210,8 +231,8 @@ export class AudioEngine {
 
   /** 按下對音鋼琴琴鍵 */
   keyOn(midi: number): void {
-    if (this.ctx && this.ctx.state === 'suspended') {
-      void this.ctx.resume();
+    if (this.ctx && isSuspendedOrInterrupted(this.ctx.state)) {
+      void this.ctx.resume().catch(() => {});
     }
     this.post({ type: 'keyOn', midi, hz: midiToHz(midi, this.a4) });
   }
@@ -234,6 +255,9 @@ export class AudioEngine {
 
   /** 設定標準音高 A4（Hz） */
   setA4(hz: number): void {
+    if (this.a4 === hz) {
+      return;
+    }
     this.a4 = hz;
     if (this.exercise) {
       this.sendCompiledExercise();

@@ -23,6 +23,7 @@ interface TransportBarProps {
   boundaryToast: boolean;
   pianoDuringSing: boolean;
   isTablet: boolean;
+  height?: number;
   getSec: () => number;
   onPrevKey: () => void;
   onPlayPause: () => void;
@@ -85,6 +86,7 @@ export function TransportBar({
   boundaryToast,
   pianoDuringSing,
   isTablet,
+  height,
   getSec,
   onPrevKey,
   onPlayPause,
@@ -119,7 +121,7 @@ export function TransportBar({
     return () => ro.disconnect();
   }, [isTablet, patternName]);
 
-  const barHeight = isTablet ? 64 : 30;
+  const barHeight = height ?? (isTablet ? 64 : 30);
   const titleFontSize = computePatternTitleFontSize(
     centerWidth,
     [...patternName].length,
@@ -195,7 +197,10 @@ export function TransportBar({
   const offsetText = formatTransposeOffset(transposeOffset);
 
   return (
-    <footer className={`transport-bar ${isTablet ? 'is-tablet' : ''}`}>
+    <footer
+      className={`transport-bar ${isTablet ? 'is-tablet' : ''}`}
+      style={{ height: `${barHeight}px` }}
+    >
       <div className="transport-left">
         <button
           type="button"

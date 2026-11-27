@@ -13,7 +13,7 @@ export function miniPianoHeight(isTablet: boolean): number {
 
 /** 依裝置類型取得把手列高度（px） */
 export function handleBarHeight(isTablet: boolean): number {
-  return isTablet ? 22 : 16;
+  return isTablet ? 12 : 10;
 }
 
 /** 依裝置類型取得單行樂譜最小高度（px） */

@@ -8,6 +8,7 @@ import {
 } from '../state/settings';
 import { PatternCard } from './PatternCard';
 import { SettingsPanel } from './SettingsPanel';
+import { VoiceClefControls } from './VoiceClefControls';
 
 export interface CategoryInfo {
   id: string;
@@ -91,7 +92,9 @@ export function PatternMenu({
   const mobileSummary = `${displayNoteName(settings.startTonic)} 起 · ${settings.rangeName} · ${settings.bpm} BPM · ${TRANSPOSE_LABELS[settings.transpose]}`;
 
   return (
-    <div className="pattern-menu">
+    <div
+      className={`pattern-menu ${settings.voice === 'male' ? 'has-male-clef' : ''}`}
+    >
       {/* 手機版橫向膠囊分類列 */}
       <nav className="mobile-cat-pills" aria-label="練習分類">
         {PATTERN_CATEGORIES.map((cat) => (
@@ -171,8 +174,13 @@ export function PatternMenu({
         />
       </aside>
 
-      {/* 手機版底部固定摘要與開始區 */}
+      {/* 手機版底部固定區（聲部／譜號 + 摘要 + 開始練唱） */}
       <div className="mobile-bottom-bar">
+        <VoiceClefControls
+          settings={settings}
+          pattern={selectedPattern}
+          onUpdate={onUpdateSettings}
+        />
         <button
           type="button"
           className="mobile-summary-btn"

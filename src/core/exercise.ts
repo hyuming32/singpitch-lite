@@ -23,6 +23,8 @@ export interface ExerciseOptions {
   keyMode?: KeyMode;
   /** 自訂主音 MIDI 清單；非空時忽略 transpose，依此清單順序建立 KeyBlock */
   tonicList?: number[];
+  /** 顯示與示範音高的半音平移量（不影響音域檢查與換調範圍），預設 0 */
+  displayTranspose?: number;
 }
 
 export interface KeyBlock {
@@ -155,9 +157,14 @@ export function buildExercise(
   const totalPatternBeats = parsed.events.reduce((sum, e) => sum + e.beats, 0);
   const passDur = totalPatternBeats * noteBeats * beatSec;
   const isStaccato = articulation === 'staccato' || parsed.staccato;
+  const displayTranspose =
+    typeof opts.displayTranspose === 'number' &&
+    Number.isFinite(opts.displayTranspose)
+      ? Math.round(opts.displayTranspose)
+      : 0;
 
   for (let keyIndex = 0; keyIndex < tonicMidis.length; keyIndex++) {
-    const tonicMidi = tonicMidis[keyIndex]!;
+    const tonicMidi = tonicMidis[keyIndex]! + displayTranspose;
     const key: Key = {
       tonicPc: ((tonicMidi % 12) + 12) % 12,
       mode: resolvedKeyMode,

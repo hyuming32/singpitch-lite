@@ -3,15 +3,21 @@ import { buildExercise } from '../../core/exercise';
 import { BUILTIN_PATTERNS } from '../../core/patterns';
 import {
   DEFAULT_SETTINGS,
+  MALE_RANGES,
+  NORMAL_RANGES,
   SETTINGS_STORAGE_KEY,
   clampStartTonic,
   findLowestFeasibleTonic,
   formatExerciseSummary,
   loadSettings,
   nextRepeatsPerKey,
+  rangesForVoice,
   repeatsPerKeyToCount,
+  resolveRangeForVoice,
+  resolveVoiceDisplay,
   sanitizeSettings,
   saveSettings,
+  switchVoiceSettings,
   toExerciseOptions,
   type PracticeSettings,
   type StorageLike,
@@ -91,6 +97,7 @@ describe('settings', () => {
       ...DEFAULT_SETTINGS,
       patternId: 'major-arpeggio',
       startTonic: 55,
+      voice: 'male',
       rangeName: '男中音',
       bpm: 120,
       noteBeats: 2,
@@ -204,5 +211,137 @@ describe('每調重複次數循環與舊設定相容', () => {
     const loaded = loadSettings(storage);
     expect(loaded.repeatsPerKey).toBe(2);
     expect(sanitizeSettings({ repeatsPerKey: 99 }).repeatsPerKey).toBe(2);
+  });
+});
+
+describe('聲部與譜號設定（voice / maleClef / resolveVoiceDisplay）', () => {
+  it('預設為 normal + treble8va，讀取舊設定 singOctaveMode 時會忽略', () => {
+    expect(DEFAULT_SETTINGS.voice).toBe('normal');
+    expect(DEFAULT_SETTINGS.maleClef).toBe('treble8va');
+
+    const migrated = sanitizeSettings({
+      singOctaveMode: 'up',
+      voice: 'invalid',
+      maleClef: 'alto',
+    });
+    expect(migrated.voice).toBe('normal');
+    expect(migrated.maleClef).toBe('treble8va');
+    expect('singOctaveMode' in migrated).toBe(false);
+  });
+
+  it('舊設定 voice 與 rangeName 不一致時自動對齊（男聲音域 → male；女聲音域 → normal；完整 C2–C6 維持不變）', () => {
+    expect(sanitizeSettings({ voice: 'normal', rangeName: '男高音' }).voice).toBe(
+      'male',
+    );
+    expect(sanitizeSettings({ rangeName: '男低音' }).voice).toBe('male');
+    expect(sanitizeSettings({ voice: 'male', rangeName: '女高音' }).voice).toBe(
+      'normal',
+    );
+    expect(sanitizeSettings({ voice: 'male', rangeName: '女低音' }).voice).toBe(
+      'normal',
+    );
+    expect(sanitizeSettings({ voice: 'male', rangeName: '完整 C2–C6' }).voice).toBe(
+      'male',
+    );
+    expect(
+      sanitizeSettings({ voice: 'normal', rangeName: '完整 C2–C6' }).voice,
+    ).toBe('normal');
+
+    const storage = createMemoryStorage({
+      [SETTINGS_STORAGE_KEY]: JSON.stringify({
+        rangeName: '男中音',
+        bpm: 100,
+      }),
+    });
+    const loaded = loadSettings(storage);
+    expect(loaded.voice).toBe('male');
+    expect(loaded.rangeName).toBe('男中音');
+  });
+
+  it('三種聲部模式的譜號、顯示位移與 8va 標籤正確', () => {
+    const majorArp = BUILTIN_PATTERNS.find((p) => p.id === 'major-arpeggio')!;
+
+    // 1. 正常（女中音 [57, 81] → 高音譜、不位移）
+    const normalDisplay = resolveVoiceDisplay({
+      voice: 'normal',
+      maleClef: 'treble8va',
+      rangeName: '女中音',
+    });
+    expect(normalDisplay).toEqual({
+      clef: 'treble',
+      pitchShift: 0,
+      octaveTag: null,
+    });
+
+    // 2. 男聲＋高音譜 8va（音高 +12、強制高音譜、顯示 8va）
+    const male8vaSettings: PracticeSettings = {
+      ...DEFAULT_SETTINGS,
+      voice: 'male',
+      maleClef: 'treble8va',
+      rangeName: '男中音',
+      startTonic: 48, // C3
+      transpose: 'fixed',
+      countIn: false,
+      mode: 'follow',
+    };
+    const male8vaDisplay = resolveVoiceDisplay(male8vaSettings);
+    expect(male8vaDisplay).toEqual({
+      clef: 'treble',
+      pitchShift: 12,
+      octaveTag: '8va',
+    });
+    const ex8va = buildExercise(majorArp, {
+      ...toExerciseOptions(male8vaSettings),
+      displayTranspose: male8vaDisplay.pitchShift,
+    });
+    expect(ex8va.keys[0]!.tonicMidi).toBe(60); // 48 + 12
+    expect(ex8va.notes[0]!.midi).toBe(60); // 鋼琴示範彈 +12 後的音
+
+    // 3. 男聲＋低音譜（實際音高、強制低音譜、不顯示 8va）
+    const maleBassSettings: PracticeSettings = {
+      ...male8vaSettings,
+      maleClef: 'bass',
+      rangeName: '男高音', // 即便選男高音 [48, 72] 也強制低音譜
+    };
+    const maleBassDisplay = resolveVoiceDisplay(maleBassSettings);
+    expect(maleBassDisplay).toEqual({
+      clef: 'bass',
+      pitchShift: 0,
+      octaveTag: null,
+    });
+    const exBass = buildExercise(majorArp, {
+      ...toExerciseOptions(maleBassSettings),
+      displayTranspose: maleBassDisplay.pitchShift,
+    });
+    expect(exBass.keys[0]!.tonicMidi).toBe(48);
+    expect(exBass.notes[0]!.midi).toBe(48);
+  });
+
+  it('音域清單依聲部過濾，且切換聲部時自動切換不屬於該聲部的音域', () => {
+    expect(rangesForVoice('normal')).toEqual(NORMAL_RANGES);
+    expect(rangesForVoice('male')).toEqual(MALE_RANGES);
+    expect(rangesForVoice('normal')).toContain('完整 C2–C6');
+    expect(rangesForVoice('male')).toContain('完整 C2–C6');
+    expect(rangesForVoice('normal')).not.toContain('男中音');
+    expect(rangesForVoice('male')).not.toContain('女中音');
+
+    // 女中音 → 切換為男聲 → 自動換成男中音
+    expect(resolveRangeForVoice('女中音', 'male')).toBe('男中音');
+    // 男高音 → 切換為正常 → 自動換成女中音
+    expect(resolveRangeForVoice('男高音', 'normal')).toBe('女中音');
+    // 完整 C2–C6 兩邊皆保留
+    expect(resolveRangeForVoice('完整 C2–C6', 'male')).toBe('完整 C2–C6');
+    expect(resolveRangeForVoice('完整 C2–C6', 'normal')).toBe('完整 C2–C6');
+
+    const majorArp = BUILTIN_PATTERNS.find((p) => p.id === 'major-arpeggio')!;
+    const patch = switchVoiceSettings(
+      { voice: 'normal', rangeName: '女中音', startTonic: 65 },
+      'male',
+      majorArp,
+    );
+    expect(patch.voice).toBe('male');
+    expect(patch.rangeName).toBe('男中音');
+    // 男中音 [43, 67] 搭配大三和弦分解 (0..12)，最高可行 startTonic 為 55
+    expect(patch.startTonic).toBe(55);
   });
 });

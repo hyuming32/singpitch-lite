@@ -1,7 +1,7 @@
 import type { Exercise, ExerciseOptions } from '../core/exercise';
 import type { JianpuMode } from '../core/jianpu';
 import { RANGES } from '../core/notes';
-import type { SingOctaveMode } from '../mic/octaveShift';
+import { clefForRange, type Clef } from '../core/staff';
 import { displayNoteName } from '../ui/noteLabel';
 import { BUILTIN_PATTERNS, parseJianpu, type PatternDef } from '../core/patterns';
 
@@ -13,6 +13,25 @@ export type TransposeOption = 'fixed' | 'up' | 'up-down';
 export type PracticeModeOption = 'follow' | 'listen-then-sing';
 export type MicInputMode = 'speaker' | 'headphone';
 export type RepeatsPerKeyOption = 1 | 2 | 3 | 5 | 'inf';
+export type VoiceOption = 'normal' | 'male';
+export type MaleClefOption = 'treble8va' | 'bass';
+
+export const NORMAL_RANGES = [
+  '女低音',
+  '女中音',
+  '女高音',
+  '完整 C2–C6',
+] as const;
+
+export const MALE_RANGES = [
+  '男低音',
+  '男中音',
+  '男高音',
+  '完整 C2–C6',
+] as const;
+
+const MALE_ONLY_RANGES = new Set<string>(['男低音', '男中音', '男高音']);
+const FEMALE_ONLY_RANGES = new Set<string>(['女低音', '女中音', '女高音']);
 
 export const REPEATS_PER_KEY_CYCLE: readonly RepeatsPerKeyOption[] = [
   1,
@@ -64,13 +83,14 @@ export interface PracticeSettings {
   noiseGateDb: number;
   latencyOffsetMs: number;
   hideSpeakerHint: boolean;
-  singOctaveMode: SingOctaveMode;
+  voice: VoiceOption;
+  maleClef: MaleClefOption;
 }
 
 export const DEFAULT_SETTINGS: PracticeSettings = {
   patternId: BUILTIN_PATTERNS[0]!.id,
   startTonic: 60, // C4
-  rangeName: '男高音',
+  rangeName: '女中音',
   bpm: 96,
   noteBeats: 1,
   repeats: 1,
@@ -93,7 +113,8 @@ export const DEFAULT_SETTINGS: PracticeSettings = {
   noiseGateDb: -45,
   latencyOffsetMs: 0,
   hideSpeakerHint: false,
-  singOctaveMode: 'auto',
+  voice: 'normal',
+  maleClef: 'treble8va',
 };
 
 function clampInt(value: unknown, min: number, max: number, fallback: number): number {
@@ -164,12 +185,21 @@ export function sanitizeSettings(raw: unknown): PracticeSettings {
       ? obj.repeatsPerKey
       : DEFAULT_SETTINGS.repeatsPerKey;
 
-  const singOctaveMode: SingOctaveMode =
-    obj.singOctaveMode === 'auto' ||
-    obj.singOctaveMode === 'up' ||
-    obj.singOctaveMode === 'none'
-      ? obj.singOctaveMode
-      : DEFAULT_SETTINGS.singOctaveMode;
+  let voice: VoiceOption =
+    obj.voice === 'normal' || obj.voice === 'male'
+      ? obj.voice
+      : DEFAULT_SETTINGS.voice;
+
+  if (MALE_ONLY_RANGES.has(rangeName)) {
+    voice = 'male';
+  } else if (FEMALE_ONLY_RANGES.has(rangeName)) {
+    voice = 'normal';
+  }
+
+  const maleClef: MaleClefOption =
+    obj.maleClef === 'treble8va' || obj.maleClef === 'bass'
+      ? obj.maleClef
+      : DEFAULT_SETTINGS.maleClef;
 
   return {
     patternId,
@@ -224,7 +254,8 @@ export function sanitizeSettings(raw: unknown): PracticeSettings {
       obj.hideSpeakerHint,
       DEFAULT_SETTINGS.hideSpeakerHint,
     ),
-    singOctaveMode,
+    voice,
+    maleClef,
   };
 }
 
@@ -268,7 +299,80 @@ export function saveSettings(
 
 /** 取得音域名稱對應的 [low, high] MIDI 範圍 */
 export function getRangeBounds(rangeName: string): readonly [number, number] {
-  return RANGES[rangeName] ?? RANGES[DEFAULT_SETTINGS.rangeName] ?? [48, 72];
+  return RANGES[rangeName] ?? RANGES[DEFAULT_SETTINGS.rangeName] ?? [57, 81];
+}
+
+/** 取得指定聲部可用的音域名稱清單（含完整 C2–C6） */
+export function rangesForVoice(voice: VoiceOption): readonly string[] {
+  return voice === 'male' ? MALE_RANGES : NORMAL_RANGES;
+}
+
+/** 取得指定聲部的預設音域名稱 */
+export function defaultRangeForVoice(voice: VoiceOption): string {
+  return voice === 'male' ? '男中音' : '女中音';
+}
+
+/** 若目前音域不屬於目標聲部，自動切換至該聲部的預設音域 */
+export function resolveRangeForVoice(
+  currentRangeName: string,
+  voice: VoiceOption,
+): string {
+  const allowed = rangesForVoice(voice);
+  return allowed.includes(currentRangeName)
+    ? currentRangeName
+    : defaultRangeForVoice(voice);
+}
+
+/** 切換聲部時產生需更新的設定欄位（含音域與起始音自動夾限） */
+export function switchVoiceSettings(
+  settings: Pick<PracticeSettings, 'voice' | 'rangeName' | 'startTonic'>,
+  nextVoice: VoiceOption,
+  pattern?: Pick<PatternDef, 'jianpu'>,
+): Partial<PracticeSettings> {
+  const nextRange = resolveRangeForVoice(settings.rangeName, nextVoice);
+  const patch: Partial<PracticeSettings> = { voice: nextVoice };
+  if (nextRange !== settings.rangeName) {
+    patch.rangeName = nextRange;
+    if (pattern) {
+      const [newLow, newHigh] = getRangeBounds(nextRange);
+      const clamped = clampStartTonic(
+        pattern,
+        settings.startTonic,
+        newLow,
+        newHigh,
+      );
+      if (clamped !== null && clamped !== settings.startTonic) {
+        patch.startTonic = clamped;
+      }
+    }
+  }
+  return patch;
+}
+
+export interface VoiceDisplayConfig {
+  clef: Clef;
+  /** 譜面與示範鋼琴的半音平移（男聲＋高音譜 8va 為 +12，其餘為 0） */
+  pitchShift: 0 | 12;
+  /** 五線譜左上標籤旁的八度標記 */
+  octaveTag: '8va' | null;
+}
+
+/** 依聲部與譜號設定計算練唱頁的譜號、音高顯示位移與 8va 標籤 */
+export function resolveVoiceDisplay(
+  settings: Pick<PracticeSettings, 'voice' | 'maleClef' | 'rangeName'>,
+): VoiceDisplayConfig {
+  if (settings.voice === 'male') {
+    if (settings.maleClef === 'treble8va') {
+      return { clef: 'treble', pitchShift: 12, octaveTag: '8va' };
+    }
+    return { clef: 'bass', pitchShift: 0, octaveTag: null };
+  }
+  const [low, high] = getRangeBounds(settings.rangeName);
+  return {
+    clef: clefForRange(low, high),
+    pitchShift: 0,
+    octaveTag: null,
+  };
 }
 
 /** 將 PracticeSettings 轉換為 buildExercise 所需的 ExerciseOptions */

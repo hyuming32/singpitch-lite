@@ -89,7 +89,7 @@ export function computeViewportLayout(
         ? 1194
         : 844;
 
-  const headerHeight = isTablet ? 56 : 30;
+  const headerHeight = isTablet ? 56 : 35;
   const transportHeight = isTablet ? 64 : 30;
   const pageGap = isTablet ? 10 : 4;
   const wsGap = isTablet ? 10 : 4;

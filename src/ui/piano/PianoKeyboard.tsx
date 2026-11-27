@@ -2,6 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AudioEngine } from '../../audio/engine';
 import { displayNoteName } from '../noteLabel';
 import {
+  toLocalPoint,
+  toLocalRect,
+  type RotationContext,
+} from '../practice/viewportRotation';
+import {
   FULL_PIANO_HIGH_MIDI,
   FULL_PIANO_LOW_MIDI,
   keyAt,
@@ -21,6 +26,7 @@ interface PianoKeyboardProps {
   height: number;
   collapsed: boolean;
   isTablet: boolean;
+  rotationCtx: RotationContext;
   engine: AudioEngine;
   onAudioError?: (msg: string) => void;
   onPressedMidisChange?: (midis: readonly number[]) => void;
@@ -66,6 +72,7 @@ export function PianoKeyboard({
   height,
   collapsed,
   isTablet,
+  rotationCtx,
   engine,
   onAudioError,
   onPressedMidisChange,
@@ -295,9 +302,10 @@ export function PianoKeyboard({
   ): number | null => {
     const vp = keysViewportRef.current;
     if (!vp) return null;
-    const rect = vp.getBoundingClientRect();
-    const localX = clientX - rect.left + clampedScrollLeft;
-    const localY = clientY - rect.top;
+    const pt = toLocalPoint(clientX, clientY, rotationCtx);
+    const rect = toLocalRect(vp.getBoundingClientRect(), rotationCtx);
+    const localX = pt.x - rect.left + clampedScrollLeft;
+    const localY = pt.y - rect.top;
     return keyAt(localX, localY, layout);
   };
 
@@ -379,10 +387,12 @@ export function PianoKeyboard({
       // 忽略部分環境不支援 setPointerCapture 的情況
     }
 
-    const barRect = scrollbarRef.current?.getBoundingClientRect();
+    const pt = toLocalPoint(e.clientX, e.clientY, rotationCtx);
+    const rawBarRect = scrollbarRef.current?.getBoundingClientRect();
     let nextStartScroll = clampedScrollLeft;
-    if (barRect) {
-      const clickX = e.clientX - barRect.left;
+    if (rawBarRect) {
+      const barRect = toLocalRect(rawBarRect, rotationCtx);
+      const clickX = pt.x - barRect.left;
       // 若點在滑塊外側，直接跳至點擊位置中心
       if (clickX < thumbLeftPx || clickX > thumbLeftPx + thumbWidthPx) {
         const targetThumbLeft = Math.max(
@@ -396,7 +406,7 @@ export function PianoKeyboard({
 
     scrollDragRef.current = {
       pointerId: e.pointerId,
-      startX: e.clientX,
+      startX: pt.x,
       startScrollLeft: nextStartScroll,
     };
   };
@@ -406,7 +416,8 @@ export function PianoKeyboard({
   ) => {
     const drag = scrollDragRef.current;
     if (!drag || drag.pointerId !== e.pointerId || maxScroll <= 0) return;
-    const dx = e.clientX - drag.startX;
+    const pt = toLocalPoint(e.clientX, e.clientY, rotationCtx);
+    const dx = pt.x - drag.startX;
     const dScroll = (dx / trackScrollablePx) * maxScroll;
     setScrollLeft(
       Math.max(0, Math.min(maxScroll, drag.startScrollLeft + dScroll)),

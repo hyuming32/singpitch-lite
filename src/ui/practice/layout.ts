@@ -572,26 +572,76 @@ export function rescaleTime(
   return Math.max(0, (sec * oldBpm) / newBpm);
 }
 
+export interface PatternTitleLayout {
+  fontSize: number;
+  ellipsis: boolean;
+}
+
+/** 估算音型名稱的字寬（CJK 全形 = 1.0em、ASCII = 0.6em），乘上 (1 + 字距) */
+export function estimatePatternTitleWidthEm(
+  textOrCharCount: string | number,
+  letterSpacing = 0.08,
+): number {
+  const spacingMul = 1 + (Number.isFinite(letterSpacing) ? letterSpacing : 0);
+  if (typeof textOrCharCount === 'number') {
+    if (!Number.isFinite(textOrCharCount) || textOrCharCount <= 0) {
+      return 0;
+    }
+    return textOrCharCount * spacingMul;
+  }
+  let emSum = 0;
+  for (const ch of textOrCharCount) {
+    const code = ch.codePointAt(0) ?? 0;
+    emSum += code <= 0x7f ? 0.6 : 1.0;
+  }
+  return emSum * spacingMul;
+}
+
+/**
+ * 計算播放列中間音型名稱的自動字級與是否需要省略號：
+ * - 最大字高 = barHeight × 0.70
+ * - 最小字高 = 最大 × 0.45
+ * - 只有低於最小字級仍放不下時才顯示 ellipsis
+ */
+export function computePatternTitleLayout(
+  availableWidth: number,
+  textOrCharCount: string | number,
+  barHeight: number,
+  letterSpacing = 0.08,
+): PatternTitleLayout {
+  const safeBarH = Number.isFinite(barHeight) && barHeight > 0 ? barHeight : 30;
+  const maxFont = safeBarH * 0.7;
+  const minFont = maxFont * 0.45;
+  const units = estimatePatternTitleWidthEm(textOrCharCount, letterSpacing);
+  if (units <= 0) {
+    return { fontSize: maxFont, ellipsis: false };
+  }
+  if (!Number.isFinite(availableWidth) || availableWidth <= 0) {
+    return { fontSize: minFont, ellipsis: true };
+  }
+  const rawFitted = availableWidth / units;
+  return {
+    fontSize: Math.max(minFont, Math.min(maxFont, rawFitted)),
+    ellipsis: rawFitted < minFont,
+  };
+}
+
 /**
  * 計算播放列中間音型名稱的自動字級（px）：
  * - 最大字高 = barHeight × 0.70
- * - 實際字級 = min(最大, availableWidth / (charCount × 1.08))
+ * - 實際字級 = min(最大, availableWidth / 字寬估算)
  * - 最小字高 = 最大 × 0.45
  */
 export function computePatternTitleFontSize(
   availableWidth: number,
-  charCount: number,
+  textOrCharCount: string | number,
   barHeight: number,
+  letterSpacing = 0.08,
 ): number {
-  const safeBarH = Number.isFinite(barHeight) && barHeight > 0 ? barHeight : 30;
-  const maxFont = safeBarH * 0.7;
-  const minFont = maxFont * 0.45;
-  if (!Number.isFinite(charCount) || charCount <= 0) {
-    return maxFont;
-  }
-  if (!Number.isFinite(availableWidth) || availableWidth <= 0) {
-    return minFont;
-  }
-  const fitted = availableWidth / (charCount * 1.08);
-  return Math.max(minFont, Math.min(maxFont, fitted));
+  return computePatternTitleLayout(
+    availableWidth,
+    textOrCharCount,
+    barHeight,
+    letterSpacing,
+  ).fontSize;
 }

@@ -155,4 +155,37 @@ describe('exercise', () => {
     );
     expect(fallback.total).toBeCloseTo(baseline.total, 6);
   });
+
+  it('supports displayTranspose without changing range feasibility or timing', () => {
+    const base = buildExercise(majorArp, {
+      startTonic: 48, // C3（男中音範圍內）
+      low: 43,
+      high: 67,
+      bpm: 120,
+      transpose: 'up',
+      countInBeats: 0,
+      restBeats: 0,
+    });
+    const shifted = buildExercise(majorArp, {
+      startTonic: 48,
+      low: 43,
+      high: 67,
+      bpm: 120,
+      transpose: 'up',
+      countInBeats: 0,
+      restBeats: 0,
+      displayTranspose: 12,
+    });
+
+    expect(shifted.keys).toHaveLength(base.keys.length);
+    expect(shifted.total).toBeCloseTo(base.total, 6);
+    for (let i = 0; i < base.keys.length; i++) {
+      expect(shifted.keys[i]!.tonicMidi).toBe(base.keys[i]!.tonicMidi + 12);
+    }
+    expect(shifted.notes).toHaveLength(base.notes.length);
+    for (let i = 0; i < base.notes.length; i++) {
+      expect(shifted.notes[i]!.midi).toBe(base.notes[i]!.midi + 12);
+      expect(shifted.notes[i]!.start).toBeCloseTo(base.notes[i]!.start, 6);
+    }
+  });
 });

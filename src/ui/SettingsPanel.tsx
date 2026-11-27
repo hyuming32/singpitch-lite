@@ -8,6 +8,8 @@ import {
   findLowestFeasibleTonic,
   formatExerciseSummary,
   getRangeBounds,
+  rangesForVoice,
+  resolveVoiceDisplay,
   toExerciseOptions,
   type ArticulationOption,
   type NoteBeatsOption,
@@ -17,6 +19,7 @@ import {
 } from '../state/settings';
 import { useAudioEngine } from './AudioContext';
 import { JianpuLine } from './JianpuLine';
+import { VoiceClefControls } from './VoiceClefControls';
 import { buildJianpuTokens } from './miniStaffData';
 
 interface SettingsPanelProps {
@@ -144,6 +147,7 @@ export function SettingsPanel({
         cadence: false,
         countInBeats: 0,
         mode: 'follow',
+        displayTranspose: resolveVoiceDisplay(settings).pitchShift,
       });
 
       await engine.unlock();
@@ -234,11 +238,14 @@ export function SettingsPanel({
             value={settings.rangeName}
             onChange={(e) => handleRangeChange(e.target.value)}
           >
-            {Object.entries(RANGES).map(([name, [rLow, rHigh]]) => (
-              <option key={name} value={name}>
-                {name}（{displayNoteName(rLow)}–{displayNoteName(rHigh)}）
-              </option>
-            ))}
+            {rangesForVoice(settings.voice).map((name) => {
+              const [rLow, rHigh] = RANGES[name]!;
+              return (
+                <option key={name} value={name}>
+                  {name}（{displayNoteName(rLow)}–{displayNoteName(rHigh)}）
+                </option>
+              );
+            })}
           </select>
         </div>
 
@@ -404,8 +411,15 @@ export function SettingsPanel({
         </div>
       </div>
 
-      {/* 固定於欄底的摘要、試聽與開始練唱 */}
+      {/* 固定於欄底的聲部／譜號、摘要、試聽與開始練唱 */}
       <div className="settings-footer">
+        {!hideStartButton && (
+          <VoiceClefControls
+            settings={settings}
+            pattern={pattern}
+            onUpdate={onUpdate}
+          />
+        )}
         <div className="settings-summary-box">
           {displayError ? (
             <div className="settings-error-box">

@@ -4,7 +4,7 @@ import { buildExercise, type Exercise, type KeyBlock } from '../../core/exercise
 import { type Key } from '../../core/key';
 import { centsBetween, hzToMidi, midiToHz } from '../../core/notes';
 import { BUILTIN_PATTERNS } from '../../core/patterns';
-import { clefForRange, staffPosition } from '../../core/staff';
+import { staffPosition } from '../../core/staff';
 import { micCtxSecToSongSec } from '../../mic/latency';
 import {
   MicController,
@@ -12,11 +12,6 @@ import {
   type MicDiagnostics,
   type MicPitchFrame,
 } from '../../mic/micController';
-import {
-  OctaveShiftTracker,
-  formatOctaveShiftBadge,
-  type OctaveShiftK,
-} from '../../mic/octaveShift';
 import { outputAt, type ActiveKey } from '../../mic/outputAt';
 import { ConfusionDetector, VoiceGate } from '../../mic/voiceGate';
 import { isStandaloneMode } from '../../state/errlog';
@@ -39,6 +34,7 @@ import {
   getRangeBounds,
   nextRepeatsPerKey,
   repeatsPerKeyToCount,
+  resolveVoiceDisplay,
   toExerciseOptions,
   type PracticeSettings,
 } from '../../state/settings';
@@ -75,6 +71,11 @@ import {
   computeViewportLayout,
   type PianoCollapsedPref,
 } from './viewportLayout';
+import {
+  readViewportSize,
+  resolvePracticeViewport,
+  toLocalPoint,
+} from './viewportRotation';
 import { PianoKeyboard } from '../piano/PianoKeyboard';
 import {
   PracticeSettingsSheet,
@@ -96,7 +97,6 @@ const EMPTY_SUNG: SungPoint[] = [];
 interface RawSungSample {
   t: number;
   rawHz: number;
-  autoK: OctaveShiftK;
   voiced: boolean;
 }
 
@@ -110,17 +110,6 @@ function median3(values: readonly number[]): number | null {
   return (sorted[mid - 1]! + sorted[mid]!) * 0.5;
 }
 
-function readViewport() {
-  if (typeof window === 'undefined') {
-    return { width: 844, height: 390 };
-  }
-  const vv = window.visualViewport;
-  return {
-    width: Math.round(vv ? vv.width : window.innerWidth),
-    height: Math.round(vv ? vv.height : window.innerHeight),
-  };
-}
-
 /** 正式練唱畫面：上方 cents 色條、簡譜帶與五線譜，下方對音鋼琴與播放列 */
 export function PracticePage({
   settings,
@@ -128,7 +117,7 @@ export function PracticePage({
   onBack,
 }: PracticePageProps) {
   const engine = useAudioEngine();
-  const [viewport, setViewport] = useState(readViewport);
+  const [viewport, setViewport] = useState(readViewportSize);
   const [sec, setSec] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -150,14 +139,11 @@ export function PracticePage({
   const [sungMidi, setSungMidi] = useState<number | null>(null);
   const [currentCents, setCurrentCents] = useState<number | null>(null);
   const [sungVersion, setSungVersion] = useState(0);
-  const [autoOctaveK, setAutoOctaveK] = useState<OctaveShiftK>(0);
   const [confusionBubbleOpen, setConfusionBubbleOpen] = useState(false);
   const [infLoopCount, setInfLoopCount] = useState(1);
 
   const micController = useMemo(() => new MicController(engine), [engine]);
   const voiceGateRef = useRef(new VoiceGate());
-  const octaveTrackerRef = useRef(new OctaveShiftTracker());
-  const autoOctaveKRef = useRef<OctaveShiftK>(0);
   const confusionRef = useRef(new ConfusionDetector());
   const rawSungRef = useRef<RawSungSample[]>([]);
   const recentVoiceRef = useRef<{ wallMs: number; hz: number }[]>([]);
@@ -168,10 +154,6 @@ export function PracticePage({
   const activeKeysRef = useRef<ActiveKey[]>([]);
   const pressedOnsetsRef = useRef<Map<number, number>>(new Map());
   const targetMidiRef = useRef<number | null>(null);
-  const targetNoteRef = useRef<{ midi: number | null; key: string | null }>({
-    midi: null,
-    key: null,
-  });
   const currentPhaseRef = useRef<'listen' | 'sing'>('sing');
   const playingRef = useRef(playing);
   playingRef.current = playing;
@@ -183,7 +165,6 @@ export function PracticePage({
   repeatsPerKeyRef.current = settings.repeatsPerKey;
   const settingsOpenRef = useRef(settingsOpen);
   settingsOpenRef.current = settingsOpen;
-  const autoMicAttemptedRef = useRef(false);
   const prevEchoRef = useRef(settings.echoCancellation);
   const exerciseRef = useRef<Exercise | null>(null);
   const loopAnchorKeyRef = useRef(0);
@@ -220,7 +201,7 @@ export function PracticePage({
   // 追蹤視窗大小、visualViewport 與橫直向切換
   useEffect(() => {
     let rafId = 0;
-    const onResize = () => setViewport(readViewport());
+    const onResize = () => setViewport(readViewportSize());
     const onOrientation = () => {
       onResize();
       rafId = requestAnimationFrame(onResize);
@@ -238,14 +219,18 @@ export function PracticePage({
     };
   }, []);
 
-  const isPortraitPhone =
-    viewport.width < 600 && viewport.height > viewport.width;
-  const isTablet = viewport.height > 500;
-  const device = isTablet ? 'tablet' : 'phone';
+  const {
+    rotated,
+    isTablet,
+    device,
+    layoutWidth,
+    layoutHeight,
+    rotationCtx,
+  } = useMemo(() => resolvePracticeViewport(viewport), [viewport]);
 
   const autoLayout = computeViewportLayout({
-    height: viewport.height,
-    width: viewport.width,
+    height: layoutHeight,
+    width: layoutWidth,
     device,
     collapsedPref: 'auto',
     preferredPianoHeight: settings.pianoHeight,
@@ -277,7 +262,6 @@ export function PracticePage({
 
   // 量測譜面紙張寬度與安全區內距
   useEffect(() => {
-    if (isPortraitPhone) return;
     const pageEl = pageRef.current;
     const scoreEl = scoreAreaRef.current;
 
@@ -309,7 +293,7 @@ export function PracticePage({
     if (pageEl) ro.observe(pageEl);
     if (scoreEl) ro.observe(scoreEl);
     return () => ro.disconnect();
-  }, [isPortraitPhone, viewport.width, viewport.height]);
+  }, [rotated, layoutWidth, layoutHeight]);
 
   const pattern = useMemo(
     () =>
@@ -317,6 +301,14 @@ export function PracticePage({
       BUILTIN_PATTERNS[0]!,
     [settings.patternId],
   );
+
+  const voiceDisplay = useMemo(
+    () => resolveVoiceDisplay(settings),
+    [settings.voice, settings.maleClef, settings.rangeName],
+  );
+  const clef = voiceDisplay.clef;
+  const pitchShift = voiceDisplay.pitchShift;
+  const octaveTag = voiceDisplay.octaveTag;
 
   // 計算完整調性序列，用於調名清單選取與記憶
   const fullKeys = useMemo<KeyBlock[]>(() => {
@@ -326,6 +318,7 @@ export function PracticePage({
         repeats: 1,
         cadence: false,
         countInBeats: 0,
+        displayTranspose: pitchShift,
       });
       return baseEx.keys;
     } catch {
@@ -340,6 +333,7 @@ export function PracticePage({
     settings.articulation,
     settings.transpose,
     settings.mode,
+    pitchShift,
   ]);
 
   const fullTonics = useMemo(
@@ -421,6 +415,7 @@ export function PracticePage({
       const ex = buildExercise(pattern, {
         ...toExerciseOptions(settings),
         repeats: repeatsPerKeyToCount(settings.repeatsPerKey),
+        displayTranspose: pitchShift,
         ...(selectedTonicList && selectedTonicList.length > 0
           ? { tonicList: selectedTonicList }
           : {}),
@@ -432,7 +427,7 @@ export function PracticePage({
         buildError: err instanceof Error ? err.message : String(err),
       };
     }
-  }, [pattern, settings, selectedTonicList]);
+  }, [pattern, settings, pitchShift, selectedTonicList]);
   exerciseRef.current = exercise;
 
   // 訂閱播放位置與結束事件
@@ -626,9 +621,6 @@ export function PracticePage({
     rawSungRef.current = [];
     recentVoiceRef.current = [];
     voiceGateRef.current.reset();
-    octaveTrackerRef.current.reset();
-    autoOctaveKRef.current = 0;
-    setAutoOctaveK(0);
     confusionRef.current.reset();
     setConfusionBubbleOpen(false);
     setSungMidi(null);
@@ -702,28 +694,12 @@ export function PracticePage({
 
       const isVoice = gate.label === 'voice' && frame.hz > 0;
       const rawMidi = isVoice ? hzToMidi(frame.hz, cfg.a4) : NaN;
-      const targetInfo = targetNoteRef.current;
-      const autoK = octaveTrackerRef.current.process({
-        mode: 'auto',
-        tSec: songSec,
-        rawMidi: Number.isFinite(rawMidi) ? rawMidi : null,
-        targetMidi: targetInfo.midi,
-        noteKey: targetInfo.key,
-      });
-      if (autoK !== autoOctaveKRef.current) {
-        autoOctaveKRef.current = autoK;
-        setAutoOctaveK(autoK);
-      }
-
-      const activeK: OctaveShiftK =
-        cfg.singOctaveMode === 'none'
-          ? 0
-          : cfg.singOctaveMode === 'up'
-            ? 1
-            : autoK;
-      const shiftedHz = isVoice ? frame.hz * Math.pow(2, activeK) : 0;
+      const shiftSemitones = resolveVoiceDisplay(cfg).pitchShift;
+      const shiftedHz = isVoice
+        ? frame.hz * Math.pow(2, shiftSemitones / 12)
+        : 0;
       const shiftedMidi =
-        isVoice && Number.isFinite(rawMidi) ? rawMidi + 12 * activeK : NaN;
+        isVoice && Number.isFinite(rawMidi) ? rawMidi + shiftSemitones : NaN;
 
       if (isVoice && Number.isFinite(shiftedMidi)) {
         setSungMidi(shiftedMidi);
@@ -757,7 +733,6 @@ export function PracticePage({
           samples.push({
             t: songSec,
             rawHz: isVoice ? frame.hz : 0,
-            autoK,
             voiced: isVoice,
           });
           setSungVersion((v) => v + 1);
@@ -793,7 +768,6 @@ export function PracticePage({
           setLiveDb(null);
           setSungMidi(null);
           setCurrentCents(null);
-          autoMicAttemptedRef.current = false;
         },
       });
       setMicActive(true);
@@ -820,7 +794,7 @@ export function PracticePage({
     setCurrentCents(null);
   }, [micController]);
 
-  // 背景切回前景時安全復原音訊與麥克風狀態
+  // 背景切回前景時安全復原音訊與麥克風狀態（不自動重開麥克風，track 已結束則熄燈）
   useEffect(() => {
     const onVisibilityChange = () => {
       if (document.visibilityState !== 'visible') {
@@ -835,8 +809,6 @@ export function PracticePage({
           }
           const ctxState = ctx.state as string;
           if (ctxState === 'closed') {
-            const shouldReopenMic =
-              micController.isActive || micActiveRef.current;
             lastPosRef.current = {
               ...lastPosRef.current,
               playing: false,
@@ -845,13 +817,10 @@ export function PracticePage({
             setPlaying(false);
             await micController.stop().catch(() => {});
             setMicActive(false);
+            setLiveDb(null);
+            setSungMidi(null);
+            setCurrentCents(null);
             await engine.init();
-            if (shouldReopenMic && !unmountedRef.current) {
-              const reopened = await startMic();
-              if (!reopened) {
-                autoMicAttemptedRef.current = false;
-              }
-            }
           } else if (ctxState === 'suspended' || ctxState === 'interrupted') {
             engine.pause();
             lastPosRef.current = {
@@ -871,7 +840,7 @@ export function PracticePage({
     return () => {
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [engine, micController, startMic]);
+  }, [engine, micController]);
 
   const getDiagnostics = useCallback((): PracticeDiagnosticsSnapshot => {
     const nowWallMs = performance.now();
@@ -886,13 +855,6 @@ export function PracticePage({
       outputLatencySec: engine.outputLatency,
       recentHz: latest ? latest.hz : null,
       recentMidi: latest ? latest.midi : null,
-      singOctaveMode: settingsRef.current.singOctaveMode,
-      activeOctaveK:
-        settingsRef.current.singOctaveMode === 'none'
-          ? 0
-          : settingsRef.current.singOctaveMode === 'up'
-            ? 1
-            : autoOctaveKRef.current,
       standalone: isStandaloneMode(),
     };
   }, [engine, micController]);
@@ -901,7 +863,6 @@ export function PracticePage({
     if (micActive) {
       await stopMic();
     } else {
-      autoMicAttemptedRef.current = true;
       await startMic();
     }
   }
@@ -999,11 +960,6 @@ export function PracticePage({
       await engine.unlock();
       await engine.init();
       await engine.unlock();
-
-      if (!micActive && !autoMicAttemptedRef.current) {
-        autoMicAttemptedRef.current = true;
-        await startMic();
-      }
 
       engine.setA4(settings.a4);
       engine.load(exercise, {
@@ -1185,7 +1141,6 @@ export function PracticePage({
   const activeKeyBlock = exercise?.keys[currentKeyIndex];
   const activeKey = activeKeyBlock?.key ?? C_MAJOR_KEY;
   const tonicMidi = activeKeyBlock?.tonicMidi ?? settings.startTonic;
-  const clef = clefForRange(rangeLow, rangeHigh);
 
   // 依實際可用視窗高度分配各區塊尺寸
   const collapsedPref: PianoCollapsedPref = forceExpandPiano
@@ -1194,8 +1149,8 @@ export function PracticePage({
       ? 'collapsed'
       : 'auto';
   const vpLayout = computeViewportLayout({
-    height: viewport.height,
-    width: viewport.width,
+    height: layoutHeight,
+    width: layoutWidth,
     device,
     collapsedPref,
     preferredPianoHeight: settings.pianoHeight,
@@ -1266,7 +1221,6 @@ export function PracticePage({
     if (raw.length === 0 || lines.length === 0) {
       return lines.map(() => EMPTY_SUNG);
     }
-    const mode = settings.singOctaveMode;
     return lines.map((line) => {
       const padStart = line.start - 0.5;
       const padEnd = line.end + 0.5;
@@ -1276,11 +1230,9 @@ export function PracticePage({
       for (const pt of raw) {
         if (pt.t < padStart) continue;
         if (pt.t > padEnd) break;
-        const k: OctaveShiftK =
-          mode === 'none' ? 0 : mode === 'up' ? 1 : pt.autoK;
         times.push(pt.t);
         pitches.push(
-          pt.rawHz > 0 ? hzToMidi(pt.rawHz, settings.a4) + 12 * k : NaN,
+          pt.rawHz > 0 ? hzToMidi(pt.rawHz, settings.a4) + pitchShift : NaN,
         );
         voiced.push(pt.voiced);
       }
@@ -1292,42 +1244,7 @@ export function PracticePage({
       }
       return pts;
     });
-  }, [lines, sungVersion, settings.a4, settings.singOctaveMode]);
-
-  // 直立手機提示：所有 hooks 必須在提早 return 之前呼叫完成
-  if (isPortraitPhone) {
-    return (
-      <div className="practice-portrait-guard">
-        <svg
-          className="rotate-phone-icon"
-          width="56"
-          height="56"
-          viewBox="0 0 56 56"
-          fill="none"
-          aria-hidden="true"
-        >
-          <rect
-            x="16"
-            y="8"
-            width="24"
-            height="40"
-            rx="4"
-            stroke="currentColor"
-            strokeWidth="2.5"
-          />
-          <circle cx="28" cy="42" r="1.8" fill="currentColor" />
-          <path
-            d="M44 20c3 4 4 9 2 14m0 0-4-1.5m4 1.5 1.5-4"
-            stroke="#4ca4ff"
-            strokeWidth="2.2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-        <p className="rotate-phone-text">請將手機轉成橫放</p>
-      </div>
-    );
-  }
+  }, [lines, sungVersion, settings.a4, pitchShift]);
 
   function handleDismissIosHint() {
     markIosInstallHintDismissed();
@@ -1341,7 +1258,6 @@ export function PracticePage({
     : { active: false, dots: [] };
 
   let targetMidi: number | null = null;
-  let targetNoteKey: string | null = null;
   const renderedLines = lines.map((line) => {
     const lineKeyBlock = exercise?.keys[line.keyIndex];
     const lineKey = lineKeyBlock?.key ?? activeKey;
@@ -1381,7 +1297,6 @@ export function PracticePage({
     if (line.isCurrent && activeNoteIdx >= 0) {
       const activeGlyph = glyphs[activeNoteIdx]!;
       targetMidi = activeGlyph.midi;
-      targetNoteKey = `${line.keyIndex}:${line.pass}:${line.phase}:${activeGlyph.start.toFixed(4)}:${activeGlyph.midi}`;
     }
 
     const showPlayhead =
@@ -1439,15 +1354,6 @@ export function PracticePage({
   });
 
   targetMidiRef.current = targetMidi;
-  targetNoteRef.current = { midi: targetMidi, key: targetNoteKey };
-
-  const activeShiftK: OctaveShiftK =
-    settings.singOctaveMode === 'none'
-      ? 0
-      : settings.singOctaveMode === 'up'
-        ? 1
-        : autoOctaveK;
-  const octaveTag = formatOctaveShiftBadge(activeShiftK);
 
   function handleDrawerPointerDown(e: React.PointerEvent<HTMLDivElement>) {
     e.preventDefault();
@@ -1456,14 +1362,15 @@ export function PracticePage({
     } catch {
       // 忽略部分環境不支援 setPointerCapture 的情況
     }
+    const pt = toLocalPoint(e.clientX, e.clientY, rotationCtx);
     const expandedFallback = clampPianoHeight(
       settings.pianoHeight ?? defaultPianoHeight(isTablet),
       maxPianoH,
     );
     handleDragRef.current = {
       pointerId: e.pointerId,
-      startY: e.clientY,
-      startX: e.clientX,
+      startY: pt.y,
+      startX: pt.x,
       savedHeight: isPianoCollapsed ? expandedFallback : effectivePianoH,
       collapsed: isPianoCollapsed,
       maxDist: 0,
@@ -1473,8 +1380,9 @@ export function PracticePage({
   function handleDrawerPointerMove(e: React.PointerEvent<HTMLDivElement>) {
     const drag = handleDragRef.current;
     if (!drag || drag.pointerId !== e.pointerId) return;
-    const dy = e.clientY - drag.startY;
-    const dx = e.clientX - drag.startX;
+    const pt = toLocalPoint(e.clientX, e.clientY, rotationCtx);
+    const dy = pt.y - drag.startY;
+    const dx = pt.x - drag.startX;
     drag.maxDist = Math.max(drag.maxDist, Math.hypot(dx, dy));
 
     if (drag.maxDist >= 6) {
@@ -1495,7 +1403,8 @@ export function PracticePage({
     handleDragRef.current = null;
     setDragHeight(null);
 
-    const dy = e.clientY - drag.startY;
+    const pt = toLocalPoint(e.clientX, e.clientY, rotationCtx);
+    const dy = pt.y - drag.startY;
     const result = resolveDrawerPointerEnd({
       savedHeight: drag.savedHeight,
       collapsed: drag.collapsed,
@@ -1541,8 +1450,11 @@ export function PracticePage({
   return (
     <div
       ref={pageRef}
-      className={`practice-page ${isTablet ? 'is-tablet' : 'is-phone'}`}
-      style={{ height: `${vpLayout.viewportHeight}px` }}
+      className={`practice-page ${isTablet ? 'is-tablet' : 'is-phone'} ${rotated ? 'is-rotated' : ''}`}
+      style={{
+        width: `${vpLayout.viewportWidth}px`,
+        height: `${vpLayout.viewportHeight}px`,
+      }}
     >
       {/* 1. 標題列 */}
       <header
@@ -1575,6 +1487,7 @@ export function PracticePage({
           onlySelected={keySelection.onlySelected}
           selectedIndices={keySelection.selectedIndices}
           isTablet={isTablet}
+          rotationCtx={rotationCtx}
           onToggleKey={handleToggleKey}
           onJumpToKey={handleJumpToFullKey}
           onReorderSelected={handleReorderSelected}
@@ -1777,7 +1690,7 @@ export function PracticePage({
           </div>
         </section>
 
-        {/* 把手列：拖動調整高度、點一下收合／展開 */}
+        {/* 把手列：2px 細線，拖動調整高度、點一下收合／展開 */}
         <div
           className={`piano-handle ${isPianoCollapsed ? 'is-collapsed' : ''}`}
           style={{ height: `${handleH}px` }}
@@ -1790,19 +1703,7 @@ export function PracticePage({
           aria-orientation="horizontal"
           aria-label="調整對音鋼琴高度"
         >
-          <span className="piano-handle-grip" aria-hidden="true">
-            <span />
-            <span />
-          </span>
-          <span className="piano-handle-text">
-            {isPianoCollapsed
-              ? vpLayout.autoCollapsed
-                ? '對音鋼琴 ▸ 空間不足已收合（點一下展開）'
-                : '對音鋼琴 ▸ 已收合（點一下展開，或往上拖）'
-              : isTablet
-                ? '對音鋼琴 ▾ 拖動調整高度 · 點一下收合'
-                : '對音鋼琴 ▾'}
-          </span>
+          <span className="piano-handle-line" aria-hidden="true" />
         </div>
 
         {/* 3. 對音鋼琴 */}
@@ -1813,6 +1714,7 @@ export function PracticePage({
           height={effectivePianoH}
           collapsed={isPianoCollapsed}
           isTablet={isTablet}
+          rotationCtx={rotationCtx}
           engine={engine}
           onAudioError={setErrorMsg}
           onPressedMidisChange={handlePressedMidisChange}

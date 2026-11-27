@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { RepeatsPerKeyOption } from '../../state/settings';
-import { computePatternTitleFontSize } from './layout';
+import { computePatternTitleLayout } from './layout';
 import { MetronomeIcon } from './MetronomeIcon';
 
 export const PIANO_HINT_STORAGE_KEY = 'singpitch-lite.piano-hint-seen.v1';
@@ -107,12 +107,18 @@ export function TransportBar({
   const transposePressTimerRef = useRef<number | null>(null);
   const transposeTipHideTimerRef = useRef<number | null>(null);
 
-  // 量測播放列中間可用寬度，自動調整音型名稱字級
+  // 量測播放列中間實際可用寬度（扣除左右 padding），自動調整音型名稱字級
   useEffect(() => {
     const el = centerRef.current;
     if (!el) return;
     const measure = () => {
-      setCenterWidth(Math.max(0, el.clientWidth - 8));
+      const cs =
+        typeof getComputedStyle === 'function' ? getComputedStyle(el) : null;
+      const padX = cs
+        ? (parseFloat(cs.paddingLeft) || 0) +
+          (parseFloat(cs.paddingRight) || 0)
+        : 8;
+      setCenterWidth(Math.max(0, el.clientWidth - padX));
     };
     measure();
     if (typeof ResizeObserver === 'undefined') return;
@@ -122,10 +128,11 @@ export function TransportBar({
   }, [isTablet, patternName]);
 
   const barHeight = height ?? (isTablet ? 64 : 30);
-  const titleFontSize = computePatternTitleFontSize(
+  const titleLayout = computePatternTitleLayout(
     centerWidth,
-    [...patternName].length,
+    patternName,
     barHeight,
+    0.08,
   );
 
   // 第一次進練唱畫面時顯示「唱的時候鋼琴是否一起彈」提示，4 秒後消失
@@ -255,8 +262,8 @@ export function TransportBar({
 
       <div className="transport-center" ref={centerRef}>
         <span
-          className="transport-pattern-title"
-          style={{ fontSize: `${titleFontSize.toFixed(2)}px` }}
+          className={`transport-pattern-title ${titleLayout.ellipsis ? 'is-ellipsis' : ''}`}
+          style={{ fontSize: `${titleLayout.fontSize.toFixed(2)}px` }}
           title={patternName}
         >
           {patternName}

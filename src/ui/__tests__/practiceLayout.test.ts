@@ -7,6 +7,7 @@ import { BUILTIN_PATTERNS } from '../../core/patterns';
 import { clefForRange } from '../../core/staff';
 import {
   computePatternTitleFontSize,
+  computePatternTitleLayout,
   currentNoteIndex,
   keyboardRange,
   noteGlyphs,
@@ -269,5 +270,23 @@ describe('computePatternTitleFontSize 播放列音型名稱字級', () => {
       64 * 0.7 * 0.45,
       5,
     );
+  });
+
+  it('可用寬 140px、7 個中文字、播放列 30px → 字級約 18px 且不省略；ASCII 採 0.6em 估算', () => {
+    const cjkRes = computePatternTitleLayout(140, '完整大調上下行', 30);
+    expect(cjkRes.fontSize).toBeCloseTo(140 / (7 * 1.08), 5);
+    expect(cjkRes.fontSize).toBeGreaterThan(18);
+    expect(cjkRes.fontSize).toBeLessThan(19);
+    expect(cjkRes.ellipsis).toBe(false);
+
+    // ASCII 字寬為 0.6em：'12345' → 5 * 0.6 * 1.08 = 3.24em
+    const asciiRes = computePatternTitleLayout(50, '12345', 30);
+    expect(asciiRes.fontSize).toBeCloseTo(50 / (5 * 0.6 * 1.08), 5);
+    expect(asciiRes.ellipsis).toBe(false);
+
+    // 窄到連最小字級 (21 * 0.45 = 9.45px) 都放不下時才省略
+    const tightRes = computePatternTitleLayout(50, '完整大調上下行', 30);
+    expect(tightRes.fontSize).toBeCloseTo(21 * 0.45, 5);
+    expect(tightRes.ellipsis).toBe(true);
   });
 });

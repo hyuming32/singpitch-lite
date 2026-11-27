@@ -1,12 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { MicDiagnostics } from '../../mic/micController';
 import {
-  formatOctaveShiftBadge,
-  formatSingOctaveModeLabel,
-  type OctaveShiftK,
-  type SingOctaveMode,
-} from '../../mic/octaveShift';
-import {
   clearErrorLogs,
   loadErrorLogs,
   type ErrorLogEntry,
@@ -18,8 +12,6 @@ export interface PracticeDiagnosticsSnapshot {
   outputLatencySec: number;
   recentHz: number | null;
   recentMidi: number | null;
-  singOctaveMode: SingOctaveMode;
-  activeOctaveK: OctaveShiftK;
   standalone: boolean;
 }
 
@@ -38,11 +30,6 @@ interface PracticeSettingsSheetProps {
 const DB_MIN = -80;
 const DB_MAX = 0;
 const CALIBRATION_MS = 2000;
-const SING_OCTAVE_OPTIONS: { value: SingOctaveMode; label: string }[] = [
-  { value: 'auto', label: '自動對齊' },
-  { value: 'up', label: '上移一個八度（男聲）' },
-  { value: 'none', label: '原音高' },
-];
 
 function dbToPercent(db: number): number {
   const clamped = Math.max(DB_MIN, Math.min(DB_MAX, db));
@@ -73,8 +60,6 @@ function formatDiagnosticsClipboardText(
     inputLatencySec: snap?.mic.inputLatencySec ?? 0,
     recentHz: snap?.recentHz ?? null,
     recentMidi: snap?.recentMidi ?? null,
-    singOctaveMode: snap?.singOctaveMode ?? 'auto',
-    activeOctaveK: snap?.activeOctaveK ?? 0,
     errorLogs: errLogs.slice(-5).reverse(),
   };
   return JSON.stringify(payload, null, 2);
@@ -264,7 +249,6 @@ export function PracticeSettingsSheet({
   const gatePercent = dbToPercent(settings.noiseGateDb);
   const clampedA4 = Math.max(430, Math.min(450, settings.a4));
   const recentErrors = errLogs.slice(-5).reverse();
-  const diagBadge = diagSnap ? formatOctaveShiftBadge(diagSnap.activeOctaveK) : null;
 
   return (
     <div
@@ -324,31 +308,7 @@ export function PracticeSettingsSheet({
             </div>
           </div>
 
-          {/* 2. 演唱八度 */}
-          <div className="setting-row setting-row-stack">
-            <div className="setting-row-inline-head">
-              <span className="setting-label">演唱八度</span>
-              <span className="setting-value-badge">
-                {formatSingOctaveModeLabel(settings.singOctaveMode)}
-              </span>
-            </div>
-            <div className="segmented-group segmented-group-wrap">
-              {SING_OCTAVE_OPTIONS.map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  className={`seg-btn ${settings.singOctaveMode === opt.value ? 'is-active' : ''}`}
-                  onClick={() =>
-                    onUpdateSettings({ singOctaveMode: opt.value })
-                  }
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* 3. 唱時鋼琴音量 */}
+          {/* 2. 唱時鋼琴音量 */}
           <div className="setting-row setting-row-stack">
             <div className="setting-row-inline-head">
               <label className="setting-label" htmlFor="sing-piano-volume">
@@ -557,12 +517,6 @@ export function PracticeSettingsSheet({
                     diagSnap?.recentMidi !== undefined
                       ? `${diagSnap.recentHz.toFixed(1)} Hz / MIDI ${diagSnap.recentMidi.toFixed(2)}`
                       : '無'}
-                  </dd>
-
-                  <dt>演唱八度</dt>
-                  <dd>
-                    {formatSingOctaveModeLabel(settings.singOctaveMode)}
-                    {diagBadge ? `（${diagBadge}）` : ''}
                   </dd>
 
                   <dt>standalone</dt>

@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import type { KeyBlock } from '../../core/exercise';
 import { tonicLabel } from './layout';
+import {
+  toLocalPoint,
+  toLocalRect,
+  type RotationContext,
+} from './viewportRotation';
 
 interface KeyStripProps {
   keys: readonly KeyBlock[];
@@ -11,6 +16,7 @@ interface KeyStripProps {
   onlySelected: boolean;
   selectedIndices: readonly number[];
   isTablet: boolean;
+  rotationCtx: RotationContext;
   onToggleKey: (fullKeyIndex: number) => void;
   onJumpToKey: (fullKeyIndex: number) => void;
   onReorderSelected: (fromOrderIdx: number, toOrderIdx: number) => void;
@@ -46,6 +52,7 @@ export function KeyStrip({
   onlySelected,
   selectedIndices,
   isTablet,
+  rotationCtx,
   onToggleKey,
   onJumpToKey,
   onReorderSelected,
@@ -70,8 +77,8 @@ export function KeyStrip({
     const container = stripRef.current;
     const el = chipRefs.current.get(activeFullKeyIndex);
     if (!container || !el) return;
-    const cRect = container.getBoundingClientRect();
-    const eRect = el.getBoundingClientRect();
+    const cRect = toLocalRect(container.getBoundingClientRect(), rotationCtx);
+    const eRect = toLocalRect(el.getBoundingClientRect(), rotationCtx);
     if (eRect.left < cRect.left + 6 || eRect.right > cRect.right - 22) {
       const targetLeft =
         el.offsetLeft - container.clientWidth / 2 + el.offsetWidth / 2;
@@ -80,7 +87,7 @@ export function KeyStrip({
         behavior: 'smooth',
       });
     }
-  }, [activeFullKeyIndex, keys.length, dragState]);
+  }, [activeFullKeyIndex, keys.length, dragState, rotationCtx]);
 
   useEffect(() => {
     return () => {
@@ -106,7 +113,7 @@ export function KeyStrip({
       if (orderIdx === -1) continue;
       const el = chipRefs.current.get(i);
       if (!el) continue;
-      const r = el.getBoundingClientRect();
+      const r = toLocalRect(el.getBoundingClientRect(), rotationCtx);
       const midX = r.left + r.width / 2;
       const dist = Math.abs(draggedCenterX - midX);
       if (dist < bestDist) {
@@ -126,7 +133,11 @@ export function KeyStrip({
     }
 
     const orderIdx = getOrderIdx(chipIndex);
-    const rect = e.currentTarget.getBoundingClientRect();
+    const rect = toLocalRect(
+      e.currentTarget.getBoundingClientRect(),
+      rotationCtx,
+    );
+    const pt = toLocalPoint(e.clientX, e.clientY, rotationCtx);
     const startCenterX = rect.left + rect.width / 2;
 
     if (pressRef.current?.timerId !== null && pressRef.current?.timerId !== undefined) {
@@ -137,8 +148,8 @@ export function KeyStrip({
       pointerId: e.pointerId,
       chipIndex,
       orderIdx,
-      startX: e.clientX,
-      startY: e.clientY,
+      startX: pt.x,
+      startY: pt.y,
       startCenterX,
       timerId: null,
       dragging: false,
@@ -175,8 +186,9 @@ export function KeyStrip({
     const press = pressRef.current;
     if (!press || press.pointerId !== e.pointerId) return;
 
-    const dx = e.clientX - press.startX;
-    const dy = e.clientY - press.startY;
+    const pt = toLocalPoint(e.clientX, e.clientY, rotationCtx);
+    const dx = pt.x - press.startX;
+    const dy = pt.y - press.startY;
 
     if (!press.dragging) {
       if (Math.hypot(dx, dy) > 6) {
@@ -213,7 +225,8 @@ export function KeyStrip({
     }
 
     if (press.dragging) {
-      const dx = e.clientX - press.startX;
+      const pt = toLocalPoint(e.clientX, e.clientY, rotationCtx);
+      const dx = pt.x - press.startX;
       const finalTo =
         e.type === 'pointerup'
           ? findClosestSelectedOrder(press.startCenterX + dx, press.orderIdx)

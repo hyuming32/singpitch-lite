@@ -8,6 +8,10 @@ import { AudioProvider } from './AudioContext';
 import { ErrorBoundary } from './ErrorBoundary';
 import { PatternMenu } from './PatternMenu';
 import { PracticePage } from './practice/PracticePage';
+import {
+  isPortraitPhoneViewport,
+  readViewportSize,
+} from './practice/viewportRotation';
 
 type AppRoute = 'scale' | 'practice' | 'midi' | 'log';
 
@@ -41,6 +45,27 @@ export function AppShell() {
   const [settings, setSettings] = useState<PracticeSettings>(() => loadSettings());
   const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
   const [customNoticeOpen, setCustomNoticeOpen] = useState(false);
+  const [viewport, setViewport] = useState(readViewportSize);
+
+  useEffect(() => {
+    let rafId = 0;
+    const onResize = () => setViewport(readViewportSize());
+    const onOrientation = () => {
+      onResize();
+      rafId = requestAnimationFrame(onResize);
+    };
+    onResize();
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', onOrientation);
+    const vv = window.visualViewport;
+    vv?.addEventListener('resize', onResize);
+    return () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('orientationchange', onOrientation);
+      vv?.removeEventListener('resize', onResize);
+    };
+  }, []);
 
   useEffect(() => {
     if (!window.location.hash) {
@@ -69,9 +94,28 @@ export function AppShell() {
   }, []);
 
   if (route === 'practice') {
+    const isPracticeRotated = isPortraitPhoneViewport(
+      viewport.width,
+      viewport.height,
+    );
     return (
       <AudioProvider>
-        <div className="app-shell is-practice">
+        <div
+          className={`app-shell is-practice ${isPracticeRotated ? 'is-rotated' : ''}`}
+          style={
+            isPracticeRotated
+              ? {
+                  position: 'fixed',
+                  left: 0,
+                  top: 0,
+                  width: `${viewport.height}px`,
+                  height: `${viewport.width}px`,
+                  transformOrigin: '0 0',
+                  transform: 'translate(100vw, 0) rotate(90deg)',
+                }
+              : undefined
+          }
+        >
           <ErrorBoundary label="PracticePage">
             <PracticePage
               settings={settings}

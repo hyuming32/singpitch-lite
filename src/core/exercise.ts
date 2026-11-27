@@ -179,21 +179,30 @@ export function buildExercise(
     const keyStart = tCursor;
 
     if (cadence) {
-      const cadenceRomans =
-        resolvedKeyMode === 'minor' ? ['i', 'V', 'i'] : ['I', 'V', 'I'];
-      for (const roman of cadenceRomans) {
+      const cadenceSteps: ReadonlyArray<{ roman: string; beats: number }> =
+        resolvedKeyMode === 'minor'
+          ? [
+              { roman: 'i', beats: 2 },
+              { roman: 'V/7', beats: 1 },
+            ]
+          : [
+              { roman: 'I', beats: 2 },
+              { roman: 'V/7', beats: 1 },
+            ];
+      for (const step of cadenceSteps) {
+        const dur = step.beats * beatSec;
         chords.push({
           start: tCursor,
-          dur: beatSec,
-          roman,
-          name: chordName(roman, key),
-          pcs: chordPitchClasses(roman, key),
+          dur,
+          roman: step.roman,
+          name: chordName(step.roman, key),
+          pcs: chordPitchClasses(step.roman, key),
           role: 'cadence',
           keyIndex,
         });
-        tCursor += beatSec;
+        tCursor += dur;
       }
-      tCursor += beatSec; // 1 拍空
+      tCursor += beatSec; // 1 拍空（吸氣預備拍）
     }
 
     const notesStart = tCursor;

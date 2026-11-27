@@ -197,6 +197,27 @@ export const BUILTIN_PATTERNS: readonly PatternDef[] = [
     jianpu: '1 2 3 2 1',
     chords: 'I',
   },
+  {
+    id: 'five-note-desc',
+    name: '五音下行',
+    category: '五聲',
+    jianpu: '5 4 3 2 1 -',
+    chords: 'I',
+  },
+  {
+    id: 'five-note-repeat',
+    name: '五音高點重複',
+    category: '五聲',
+    jianpu: '1 2 3 4 5 5 5 5 4 3 2 1',
+    chords: 'I',
+  },
+  {
+    id: 'pentatonic-desc-run',
+    name: '五聲下行轉音',
+    category: '五聲',
+    jianpu: "1' 6 5 3 2 1 -",
+    chords: 'I',
+  },
   // 大調
   {
     id: 'major-scale',
@@ -206,10 +227,31 @@ export const BUILTIN_PATTERNS: readonly PatternDef[] = [
     chords: 'I IV I V I',
   },
   {
+    id: 'major-desc',
+    name: '大調下行',
+    category: '大調',
+    jianpu: "1' 7 6 5 4 3 2 1 -",
+    chords: 'I',
+  },
+  {
     id: 'ninth-scale',
     name: '九度音階',
     category: '大調',
     jianpu: "1 3 5 1' 2' 1' 7 6 5 4 3 2 1",
+    chords: 'I',
+  },
+  {
+    id: 'tenth-scale',
+    name: '十度延伸音階',
+    category: '大調',
+    jianpu: "1 2 3 4 5 6 7 1' 2' 3' 2' 1' 7 6 5 4 3 2 1",
+    chords: 'I',
+  },
+  {
+    id: 'third-sequence',
+    name: '三度模進音階',
+    category: '大調',
+    jianpu: '1 3 2 4 3 5 4 6 5 3 1',
     chords: 'I',
   },
   // 小調
@@ -241,6 +283,13 @@ export const BUILTIN_PATTERNS: readonly PatternDef[] = [
     jianpu: '1 2 b3 4 5 4 b3 2 1',
     chords: 'i',
   },
+  {
+    id: 'blues-scale',
+    name: '藍調音階',
+    category: '小調',
+    jianpu: "1 b3 4 #4 5 b7 1' b7 5 #4 4 b3 1",
+    chords: 'i',
+  },
   // 跳音／琶音
   {
     id: 'fifth-leap',
@@ -261,6 +310,27 @@ export const BUILTIN_PATTERNS: readonly PatternDef[] = [
     name: '大三和弦分解',
     category: '跳音／琶音',
     jianpu: "1 3 5 1' 5 3 1",
+    chords: 'I',
+  },
+  {
+    id: 'major-triad-desc',
+    name: '大三和弦下行',
+    category: '跳音／琶音',
+    jianpu: "1' 5 3 1 -",
+    chords: 'I',
+  },
+  {
+    id: 'major-arp-repeat',
+    name: '八度琶音高音維持',
+    category: '跳音／琶音',
+    jianpu: "1 3 5 1' 1' 1' 5 3 1",
+    chords: 'I',
+  },
+  {
+    id: 'rossini-arp',
+    name: '十二度羅西尼琶音',
+    category: '跳音／琶音',
+    jianpu: "1 3 5 1' 3' 1' 5 3 1",
     chords: 'I',
   },
   {

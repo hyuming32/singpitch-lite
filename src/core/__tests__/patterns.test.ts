@@ -50,8 +50,11 @@ describe('patterns', () => {
   });
 
   it('parses all builtin patterns without error', () => {
-    expect(BUILTIN_PATTERNS.length).toBeGreaterThanOrEqual(20);
+    expect(BUILTIN_PATTERNS.length).toBeGreaterThanOrEqual(30);
+    const ids = new Set<string>();
     for (const p of BUILTIN_PATTERNS) {
+      expect(ids.has(p.id)).toBe(false);
+      ids.add(p.id);
       const res = parseJianpu(p.jianpu);
       expect(res.events.length).toBeGreaterThan(0);
     }

@@ -60,7 +60,11 @@ describe('exercise', () => {
     });
     expect(ex.notes.filter((n) => n.phase === 'listen')).toHaveLength(7);
     expect(ex.notes.filter((n) => n.phase === 'sing')).toHaveLength(7);
-    expect(ex.chords.filter((c) => c.role === 'cadence')).toHaveLength(3);
+    const cadences = ex.chords.filter((c) => c.role === 'cadence');
+    expect(cadences).toHaveLength(2);
+    expect(cadences.map((c) => c.roman)).toEqual(['I', 'V/7']);
+    expect(cadences[0]?.dur).toBeCloseTo(1.0, 6);
+    expect(cadences[1]?.dur).toBeCloseTo(0.5, 6);
   });
 
   it('throws on out-of-range or invalid bpm', () => {
@@ -212,15 +216,15 @@ describe('exercise', () => {
     expect(numKeys).toBeGreaterThan(2);
 
     const cadenceChords = withCadence.chords.filter((c) => c.role === 'cadence');
-    // 每個調只有 1 組 cadence（3 個和弦：I, V, I），總組數＝調數
+    // 每個調只有 1 組 cadence（2 個和弦：I, V/7），總組數＝調數
     const cadenceKeys = new Set(cadenceChords.map((c) => c.keyIndex));
     expect(cadenceKeys.size).toBe(numKeys);
-    expect(cadenceChords).toHaveLength(numKeys * 3);
+    expect(cadenceChords).toHaveLength(numKeys * 2);
 
     // 每個調的 cadence 皆位於該調第 1 遍起點（notesStart）之前，同調遍與遍之間沒有 cadence
     for (const kb of withCadence.keys) {
       const keyCadences = cadenceChords.filter((c) => c.keyIndex === kb.index);
-      expect(keyCadences).toHaveLength(3);
+      expect(keyCadences).toHaveLength(2);
       expect(kb.notesStart - kb.start).toBeCloseTo(2.0, 6); // 4 拍 × 0.5 秒
       for (const c of keyCadences) {
         expect(c.start).toBeGreaterThanOrEqual(kb.start - 1e-6);
@@ -259,7 +263,7 @@ describe('exercise', () => {
 
     expect(ex.keys).toHaveLength(2);
     const cadenceChords = ex.chords.filter((c) => c.role === 'cadence');
-    expect(cadenceChords).toHaveLength(6); // 2 個調 × 3 和弦
+    expect(cadenceChords).toHaveLength(4); // 2 個調 × 2 和弦（I, V/7）
 
     for (const kb of ex.keys) {
       const listenNotes = ex.notes.filter(

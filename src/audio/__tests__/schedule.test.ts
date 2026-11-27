@@ -32,11 +32,21 @@ describe('compileExercise', () => {
     expect(clicks).toHaveLength(4);
     expect(clicks.map((c) => c.frame)).toEqual([0, 24000, 48000, 72000]);
 
-    // 驗證 cadence 三個和弦（每個和弦 3 個音 = 9 個 noteOn）
+    // 驗證 cadence 兩個引導和弦（I → V/7，每個和弦 3 個音 = 6 個 noteOn）
     const cadenceOn = compiled.events.filter(
       (e) => e.type === 'noteOn' && e.bus === 'cadence',
     );
-    expect(cadenceOn).toHaveLength(9);
+    expect(cadenceOn).toHaveLength(6);
+    // 驗證 C 大調 I (1 3 5 = C4 E4 G4) → V/7 (7低 2 5 = B3 D4 G4) 的就近聲部連接
+    const cadenceIds = cadenceOn.map((e) => (e.type === 'noteOn' ? e.id : ''));
+    expect(cadenceIds).toEqual([
+      'cadence:0:60',
+      'cadence:0:64',
+      'cadence:0:67',
+      'cadence:1:59',
+      'cadence:1:62',
+      'cadence:1:67',
+    ]);
 
     // 驗證 pad id 前綴
     const padOn = compiled.events.filter(

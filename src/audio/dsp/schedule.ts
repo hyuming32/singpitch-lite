@@ -79,6 +79,44 @@ function voiceChord(pcs: readonly number[]): number[] {
   return midis;
 }
 
+/**
+ * 為引導和弦（cadence）配置就近聲部連接（例如 I → V/7 的 1 3 5 → 7(低) 2 5）：
+ * 首個和弦置於舒適中音區（F3–E4），後續和弦低音取距離前一低音最近的位置並向上疊置。
+ */
+function voiceCadenceChord(
+  pcs: readonly number[],
+  prevBassMidi: number | null,
+): number[] {
+  if (pcs.length === 0) {
+    return [];
+  }
+  const bassPc = ((pcs[0]! % 12) + 12) % 12;
+  let bassMidi: number;
+  if (prevBassMidi === null) {
+    bassMidi = bassPc <= 4 ? 60 + bassPc : 48 + bassPc;
+  } else {
+    bassMidi = 48 + bassPc;
+    while (bassMidi - prevBassMidi > 6) {
+      bassMidi -= 12;
+    }
+    while (prevBassMidi - bassMidi > 6) {
+      bassMidi += 12;
+    }
+  }
+
+  const midis: number[] = [bassMidi];
+  let prev = bassMidi;
+  for (let i = 1; i < pcs.length; i++) {
+    let m = 48 + (((pcs[i]! % 12) + 12) % 12);
+    while (m <= prev) {
+      m += 12;
+    }
+    midis.push(m);
+    prev = m;
+  }
+  return midis;
+}
+
 /** 將 Exercise 編譯為以樣本幀排序的排程事件表 */
 export function compileExercise(
   ex: Exercise,
@@ -140,6 +178,8 @@ export function compileExercise(
   }
 
   // 和弦（pad 與 cadence）
+  let cadenceKeyIndex = -1;
+  let prevCadenceBass: number | null = null;
   for (let ci = 0; ci < ex.chords.length; ci++) {
     const chord = ex.chords[ci]!;
     if (chord.role === 'pad' && !pad) {
@@ -148,8 +188,20 @@ export function compileExercise(
 
     const startFrame = Math.round(chord.start * rate);
     const endFrame = Math.round((chord.start + chord.dur) * rate);
-    const midis = voiceChord(chord.pcs);
     const isPad = chord.role === 'pad';
+    let midis: number[];
+    if (isPad) {
+      midis = voiceChord(chord.pcs);
+    } else {
+      if (chord.keyIndex !== cadenceKeyIndex) {
+        cadenceKeyIndex = chord.keyIndex;
+        prevCadenceBass = null;
+      }
+      midis = voiceCadenceChord(chord.pcs, prevCadenceBass);
+      if (midis.length > 0) {
+        prevCadenceBass = midis[0]!;
+      }
+    }
     const bus = isPad ? 'pad' : 'cadence';
 
     for (let mi = 0; mi < midis.length; mi++) {

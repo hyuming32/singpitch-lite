@@ -23,6 +23,10 @@ describe('chords', () => {
     expect(chordName('♭VI', cMajor)).toBe('A♭');
     expect(chordName('♭III', cMajor)).toBe('E♭');
     expect(chordName('♭VI', cMinor)).toBe('A♭');
+    expect(chordName('V/7', cMajor)).toBe('G/B');
+    expect(chordPitchClasses('V/7', cMajor)).toEqual([11, 2, 7]);
+    expect(chordName('V/7', dMajor)).toBe('A/C♯');
+    expect(chordName('V/7', aMinor)).toBe('E/G♯');
   });
 
   it('throws Traditional Chinese error on invalid input', () => {

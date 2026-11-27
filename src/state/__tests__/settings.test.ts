@@ -113,7 +113,7 @@ describe('settings', () => {
       repeatsPerKey: 3,
       articulation: 'staccato',
       transpose: 'up',
-      mode: 'follow',
+      mode: 'listen-then-sing',
       pianoDuringSing: false,
       pad: false,
       cadence: 'single',
@@ -226,8 +226,10 @@ describe('每調重複次數循環與舊設定相容', () => {
     expect(repeatsPerKeyToCount('inf')).toBe(1);
   });
 
-  it('預設為 2，且讀取舊設定檔缺少 repeatsPerKey 時補預設 2', () => {
-    expect(DEFAULT_SETTINGS.repeatsPerKey).toBe(2);
+  it('預設為 1 且 mode 預設為 follow，讀取舊設定檔缺少 repeatsPerKey 時補預設 1，已有合法 mode 與 repeatsPerKey 則保留', () => {
+    expect(DEFAULT_SETTINGS.repeatsPerKey).toBe(1);
+    expect(DEFAULT_SETTINGS.mode).toBe('follow');
+
     const oldPayload = JSON.stringify({
       patternId: 'major-arpeggio',
       bpm: 100,
@@ -237,12 +239,23 @@ describe('每調重複次數循環與舊設定相容', () => {
       [SETTINGS_STORAGE_KEY]: oldPayload,
     });
     const loaded = loadSettings(storage);
-    expect(loaded.repeatsPerKey).toBe(2);
+    expect(loaded.repeatsPerKey).toBe(1);
+    expect(loaded.mode).toBe('follow');
     expect('repeats' in loaded).toBe(false);
-    expect(sanitizeSettings({ repeatsPerKey: 99 }).repeatsPerKey).toBe(2);
+    expect(sanitizeSettings({ repeatsPerKey: 99 }).repeatsPerKey).toBe(1);
     expect(
       sanitizeSettings({ repeats: 4, repeatsPerKey: 5 }).repeatsPerKey,
     ).toBe(5);
+
+    const savedListenStorage = createMemoryStorage({
+      [SETTINGS_STORAGE_KEY]: JSON.stringify({
+        mode: 'listen-then-sing',
+        repeatsPerKey: 2,
+      }),
+    });
+    const loadedListen = loadSettings(savedListenStorage);
+    expect(loadedListen.mode).toBe('listen-then-sing');
+    expect(loadedListen.repeatsPerKey).toBe(2);
   });
 });
 

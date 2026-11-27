@@ -44,11 +44,13 @@ import {
   resolveVoiceDisplay,
   stepBpm,
   toExerciseOptions,
+  type PracticeModeOption,
   type PracticeSettings,
 } from '../../state/settings';
 import { useAudioEngine } from '../AudioContext';
 import { JianpuStrip } from './JianpuStrip';
 import { KeyStrip } from './KeyStrip';
+import { ModeToggleButton } from './ModeToggleButton';
 import {
   computeStaffMetrics,
   countInDotStates,
@@ -1212,6 +1214,16 @@ export function PracticePage({
     onUpdateSettings({ repeatsPerKey: next });
   }
 
+  function handleToggleMode(nextMode: PracticeModeOption) {
+    if (playing || sec > 0) {
+      pendingSeekKeyRef.current = {
+        keyIndex: currentKeyIndex,
+        resumePlay: playing,
+      };
+    }
+    onUpdateSettings({ mode: nextMode });
+  }
+
   function handleBackClick() {
     engine.stop();
     void stopMic();
@@ -1835,6 +1847,11 @@ export function PracticePage({
         />
 
         <div className="practice-header-right">
+          <ModeToggleButton
+            mode={settings.mode}
+            isCompact={isPortrait}
+            onToggle={handleToggleMode}
+          />
           {!isPortrait && (
             <button
               type="button"

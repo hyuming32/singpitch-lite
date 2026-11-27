@@ -1700,6 +1700,22 @@ button:disabled {
   font-size: 14px;
 }
 
+.practice-mode-btn {
+  flex-shrink: 0;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.practice-mode-btn.is-listen-then-sing {
+  border-color: var(--blue);
+  background-color: var(--blue-bg);
+  color: var(--text);
+}
+
+.practice-page.is-portrait .practice-mode-btn.is-compact {
+  height: 39px;
+  padding: 0 8px;
+}
+
 .rec-dot {
   width: 7px;
   height: 7px;

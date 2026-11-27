@@ -31,6 +31,7 @@ import {
 } from '../../state/keySelection';
 import {
   clampBpm,
+  findLowestFeasibleTonic,
   getPatternSpan,
   getRangeBounds,
   nextRepeatsPerKey,
@@ -290,7 +291,7 @@ export function PracticePage({
 
   const voiceDisplay = useMemo(
     () => resolveVoiceDisplay(settings),
-    [settings.voice, settings.maleClef, settings.rangeName],
+    [settings.voice, settings.maleClef, settings.rangeName, settings.myRange],
   );
   const clef = voiceDisplay.clef;
   const pitchShift = voiceDisplay.pitchShift;
@@ -314,6 +315,7 @@ export function PracticePage({
     pattern,
     settings.startTonic,
     settings.rangeName,
+    settings.myRange,
     settings.bpm,
     settings.noteBeats,
     settings.articulation,
@@ -875,10 +877,12 @@ export function PracticePage({
   }, [exercise]);
 
   // 移調邊界計算
-  const [rangeLow, rangeHigh] = getRangeBounds(settings.rangeName);
+  const [rangeLow, rangeHigh] = getRangeBounds(settings.rangeName, settings.myRange);
   const { minSemi, maxSemi } = useMemo(() => getPatternSpan(pattern), [pattern]);
   const feasibleLow = rangeLow - minSemi;
   const feasibleHigh = rangeHigh - maxSemi;
+  const isPatternOutOfRange =
+    findLowestFeasibleTonic(pattern, rangeLow, rangeHigh) === null;
   const canTransposeDown = settings.startTonic - 1 >= feasibleLow;
   const canTransposeUp = settings.startTonic + 1 <= feasibleHigh;
   const transposeOffset = settings.startTonic - baseTonicRef.current;
@@ -1576,7 +1580,8 @@ export function PracticePage({
 
           {(errorMsg || buildError) && (
             <div className="sheet-error" role="alert">
-              {errorMsg ?? buildError}
+              {errorMsg ??
+                (isPatternOutOfRange ? '這個音型超出目前音域' : buildError)}
             </div>
           )}
 

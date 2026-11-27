@@ -35,6 +35,10 @@ describe('notes', () => {
   it('defines expected vocal ranges', () => {
     expect(RANGES['完整 C2–C6']).toEqual([36, 84]);
     expect(RANGES['男低音']).toEqual([40, 64]);
+    expect(RANGES['男中音']).toEqual([44, 68]);
+    expect(RANGES['男高音']).toEqual([48, 72]);
+    expect(RANGES['女低音']).toEqual([52, 76]);
+    expect(RANGES['女中音']).toEqual([57, 81]);
     expect(RANGES['女高音']).toEqual([60, 84]);
   });
 });

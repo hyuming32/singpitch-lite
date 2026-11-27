@@ -1,18 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { buildExercise, type Exercise } from '../core/exercise';
-import { RANGES } from '../core/notes';
 import { displayNoteName } from './noteLabel';
 import type { PatternDef } from '../core/patterns';
 import {
   BPM_MAX,
   BPM_MIN,
+  MY_RANGE_NAME,
   clampBpm,
-  clampStartTonic,
   findLowestFeasibleTonic,
   formatBpm,
   formatExerciseSummary,
   getRangeBounds,
-  rangesForVoice,
   resolveVoiceDisplay,
   stepBpm,
   toExerciseOptions,
@@ -21,9 +19,12 @@ import {
   type PracticeModeOption,
   type PracticeSettings,
   type TransposeOption,
+  type VoiceOption,
 } from '../state/settings';
+import { resolveStartTonicForRange } from '../state/vocalRange';
 import { useAudioEngine } from './AudioContext';
 import { JianpuLine } from './JianpuLine';
+import { RangeChart } from './RangeChart';
 import { VoiceClefControls } from './VoiceClefControls';
 import { buildJianpuTokens } from './miniStaffData';
 import { useBpmEdit } from './useBpmEdit';
@@ -34,6 +35,7 @@ interface SettingsPanelProps {
   settings: PracticeSettings;
   onUpdate: (patch: Partial<PracticeSettings>) => void;
   onStartPractice: () => void;
+  onOpenRangeTest: () => void;
   /** 手機版在全螢幕設定抽屜內可隱藏底部開始按鈕 */
   hideStartButton?: boolean;
 }
@@ -68,6 +70,7 @@ export function SettingsPanel({
   settings,
   onUpdate,
   onStartPractice,
+  onOpenRangeTest,
   hideStartButton = false,
 }: SettingsPanelProps) {
   const engine = useAudioEngine();
@@ -106,7 +109,7 @@ export function SettingsPanel({
   });
 
   const jianpuTokens = useMemo(() => buildJianpuTokens(pattern, 60), [pattern]);
-  const [low, high] = getRangeBounds(settings.rangeName);
+  const [low, high] = getRangeBounds(settings.rangeName, settings.myRange);
   const lowestFeasible = useMemo(
     () => findLowestFeasibleTonic(pattern, low, high),
     [pattern, low, high],
@@ -147,13 +150,36 @@ export function SettingsPanel({
   }, [engine]);
 
   function handleRangeChange(newRangeName: string) {
-    const [newLow, newHigh] = getRangeBounds(newRangeName);
-    const clamped = clampStartTonic(pattern, settings.startTonic, newLow, newHigh);
-    if (clamped !== null && clamped !== settings.startTonic) {
-      onUpdate({ rangeName: newRangeName, startTonic: clamped });
-    } else {
-      onUpdate({ rangeName: newRangeName });
+    const [newLow, newHigh] = getRangeBounds(newRangeName, settings.myRange);
+    const nextStart = resolveStartTonicForRange(
+      pattern,
+      settings.startTonic,
+      newLow,
+      newHigh,
+    );
+
+    let nextVoice: VoiceOption | undefined;
+    if (
+      newRangeName === '男低音' ||
+      newRangeName === '男中音' ||
+      newRangeName === '男高音'
+    ) {
+      nextVoice = 'male';
+    } else if (
+      newRangeName === '女低音' ||
+      newRangeName === '女中音' ||
+      newRangeName === '女高音'
+    ) {
+      nextVoice = 'normal';
+    } else if (newRangeName === MY_RANGE_NAME && settings.myRange) {
+      nextVoice = settings.myRange.voice;
     }
+
+    onUpdate({
+      rangeName: newRangeName,
+      ...(nextVoice !== undefined ? { voice: nextVoice } : {}),
+      ...(nextStart !== settings.startTonic ? { startTonic: nextStart } : {}),
+    });
   }
 
   function handleAutoAdjustTonic() {
@@ -220,7 +246,7 @@ export function SettingsPanel({
 
   const displayError = buildError
     ? lowestFeasible === null
-      ? '此圖案超出所選音域'
+      ? '這個音型超出目前音域'
       : buildError
     : null;
 
@@ -265,26 +291,21 @@ export function SettingsPanel({
           </div>
         </div>
 
-        {/* 音域 */}
-        <div className="setting-row">
-          <label className="setting-label" htmlFor="range-select">
-            音域
-          </label>
-          <select
-            id="range-select"
-            className="setting-select"
-            value={settings.rangeName}
-            onChange={(e) => handleRangeChange(e.target.value)}
+        {/* 音域圖與試唱測音域 */}
+        <div className="setting-row setting-row-stack">
+          <RangeChart
+            selectedRangeName={settings.rangeName}
+            myRange={settings.myRange}
+            onSelectRange={handleRangeChange}
+            showFullRangeOption
+          />
+          <button
+            type="button"
+            className="range-test-open-btn"
+            onClick={onOpenRangeTest}
           >
-            {rangesForVoice(settings.voice).map((name) => {
-              const [rLow, rHigh] = RANGES[name]!;
-              return (
-                <option key={name} value={name}>
-                  {name}（{displayNoteName(rLow)}–{displayNoteName(rHigh)}）
-                </option>
-              );
-            })}
-          </select>
+            🎤 試唱測音域
+          </button>
         </div>
 
         {/* 速度 */}

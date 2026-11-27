@@ -30,8 +30,21 @@ export const MALE_RANGES = [
   '完整 C2–C6',
 ] as const;
 
+/** 自訂測量音域名稱與最低有效半音跨度 */
+export const MY_RANGE_NAME = '我的音域';
+export const MIN_MY_RANGE_SEMITONES = 8;
+
 const MALE_ONLY_RANGES = new Set<string>(['男低音', '男中音', '男高音']);
 const FEMALE_ONLY_RANGES = new Set<string>(['女低音', '女中音', '女高音']);
+
+export interface MyRangeData {
+  low: number;
+  high: number;
+  raw: [number, number];
+  method: 'twoNotes' | 'glide';
+  voice: VoiceOption;
+  measuredAt: string;
+}
 
 export const REPEATS_PER_KEY_CYCLE: readonly RepeatsPerKeyOption[] = [
   1,
@@ -85,6 +98,7 @@ export interface PracticeSettings {
   hideSpeakerHint: boolean;
   voice: VoiceOption;
   maleClef: MaleClefOption;
+  myRange: MyRangeData | null;
 }
 
 export const DEFAULT_SETTINGS: PracticeSettings = {
@@ -115,6 +129,7 @@ export const DEFAULT_SETTINGS: PracticeSettings = {
   hideSpeakerHint: false,
   voice: 'normal',
   maleClef: 'treble8va',
+  myRange: null,
 };
 
 export const BPM_MIN = 40;
@@ -189,6 +204,69 @@ function validateBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback;
 }
 
+function sanitizeMyRange(value: unknown): MyRangeData | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const obj = value as Record<string, unknown>;
+  if (
+    typeof obj.low !== 'number' ||
+    !Number.isFinite(obj.low) ||
+    typeof obj.high !== 'number' ||
+    !Number.isFinite(obj.high)
+  ) {
+    return null;
+  }
+  const low = Math.round(obj.low);
+  const high = Math.round(obj.high);
+  if (low < 21 || high > 108 || low > high) {
+    return null;
+  }
+
+  if (!Array.isArray(obj.raw) || obj.raw.length !== 2) {
+    return null;
+  }
+  const r0 = obj.raw[0];
+  const r1 = obj.raw[1];
+  if (
+    typeof r0 !== 'number' ||
+    !Number.isFinite(r0) ||
+    typeof r1 !== 'number' ||
+    !Number.isFinite(r1)
+  ) {
+    return null;
+  }
+  const rawLow = Math.round(r0);
+  const rawHigh = Math.round(r1);
+  if (
+    rawLow < 21 ||
+    rawHigh > 108 ||
+    rawHigh - rawLow < MIN_MY_RANGE_SEMITONES ||
+    high - low < MIN_MY_RANGE_SEMITONES - 2
+  ) {
+    return null;
+  }
+
+  const method =
+    obj.method === 'twoNotes' || obj.method === 'glide' ? obj.method : null;
+  const voice: VoiceOption | null =
+    obj.voice === 'male' || obj.voice === 'normal' ? obj.voice : null;
+  const measuredAt = typeof obj.measuredAt === 'string' ? obj.measuredAt : null;
+
+  if (!method || !voice || !measuredAt) {
+    return null;
+  }
+
+  return {
+    low,
+    high,
+    raw: [rawLow, rawHigh],
+    method,
+    voice,
+    measuredAt,
+  };
+}
+
 /** 驗證並正規化練習設定，確保壞資料或超範圍數值不影響執行 */
 export function sanitizeSettings(raw: unknown): PracticeSettings {
   if (!raw || typeof raw !== 'object') {
@@ -202,8 +280,12 @@ export function sanitizeSettings(raw: unknown): PracticeSettings {
       ? obj.patternId
       : DEFAULT_SETTINGS.patternId;
 
+  const myRange = sanitizeMyRange(obj.myRange);
+
   const rangeName =
-    typeof obj.rangeName === 'string' && obj.rangeName in RANGES
+    typeof obj.rangeName === 'string' &&
+    (obj.rangeName in RANGES ||
+      (obj.rangeName === MY_RANGE_NAME && myRange !== null))
       ? obj.rangeName
       : DEFAULT_SETTINGS.rangeName;
 
@@ -255,6 +337,13 @@ export function sanitizeSettings(raw: unknown): PracticeSettings {
     voice = 'male';
   } else if (FEMALE_ONLY_RANGES.has(rangeName)) {
     voice = 'normal';
+  } else if (
+    rangeName === MY_RANGE_NAME &&
+    myRange &&
+    obj.voice !== 'normal' &&
+    obj.voice !== 'male'
+  ) {
+    voice = myRange.voice;
   }
 
   const maleClef: MaleClefOption =
@@ -317,6 +406,7 @@ export function sanitizeSettings(raw: unknown): PracticeSettings {
     ),
     voice,
     maleClef,
+    myRange,
   };
 }
 
@@ -358,8 +448,22 @@ export function saveSettings(
   }
 }
 
-/** 取得音域名稱對應的 [low, high] MIDI 範圍 */
-export function getRangeBounds(rangeName: string): readonly [number, number] {
+/** 取得音域名稱對應的 [low, high] MIDI 範圍；若為我的音域但未測量則退回預設 */
+export function getRangeBounds(
+  rangeName: string,
+  myRange?: MyRangeData | null,
+): readonly [number, number] {
+  if (rangeName === MY_RANGE_NAME) {
+    if (
+      myRange &&
+      Number.isFinite(myRange.low) &&
+      Number.isFinite(myRange.high) &&
+      myRange.high >= myRange.low
+    ) {
+      return [myRange.low, myRange.high];
+    }
+    return RANGES[DEFAULT_SETTINGS.rangeName] ?? [57, 81];
+  }
   return RANGES[rangeName] ?? RANGES[DEFAULT_SETTINGS.rangeName] ?? [57, 81];
 }
 
@@ -373,11 +477,14 @@ export function defaultRangeForVoice(voice: VoiceOption): string {
   return voice === 'male' ? '男中音' : '女中音';
 }
 
-/** 若目前音域不屬於目標聲部，自動切換至該聲部的預設音域 */
+/** 若目前音域不屬於目標聲部，自動切換至該聲部的預設音域（我的音域與完整範圍保留） */
 export function resolveRangeForVoice(
   currentRangeName: string,
   voice: VoiceOption,
 ): string {
+  if (currentRangeName === MY_RANGE_NAME) {
+    return MY_RANGE_NAME;
+  }
   const allowed = rangesForVoice(voice);
   return allowed.includes(currentRangeName)
     ? currentRangeName
@@ -386,7 +493,9 @@ export function resolveRangeForVoice(
 
 /** 切換聲部時產生需更新的設定欄位（含音域與起始音自動夾限） */
 export function switchVoiceSettings(
-  settings: Pick<PracticeSettings, 'voice' | 'rangeName' | 'startTonic'>,
+  settings: Pick<PracticeSettings, 'voice' | 'rangeName' | 'startTonic'> & {
+    myRange?: MyRangeData | null;
+  },
   nextVoice: VoiceOption,
   pattern?: Pick<PatternDef, 'jianpu'>,
 ): Partial<PracticeSettings> {
@@ -395,7 +504,7 @@ export function switchVoiceSettings(
   if (nextRange !== settings.rangeName) {
     patch.rangeName = nextRange;
     if (pattern) {
-      const [newLow, newHigh] = getRangeBounds(nextRange);
+      const [newLow, newHigh] = getRangeBounds(nextRange, settings.myRange);
       const clamped = clampStartTonic(
         pattern,
         settings.startTonic,
@@ -420,7 +529,9 @@ export interface VoiceDisplayConfig {
 
 /** 依聲部與譜號設定計算練唱頁的譜號、音高顯示位移與 8va 標籤 */
 export function resolveVoiceDisplay(
-  settings: Pick<PracticeSettings, 'voice' | 'maleClef' | 'rangeName'>,
+  settings: Pick<PracticeSettings, 'voice' | 'maleClef' | 'rangeName'> & {
+    myRange?: MyRangeData | null;
+  },
 ): VoiceDisplayConfig {
   if (settings.voice === 'male') {
     if (settings.maleClef === 'treble8va') {
@@ -428,7 +539,7 @@ export function resolveVoiceDisplay(
     }
     return { clef: 'bass', pitchShift: 0, octaveTag: null };
   }
-  const [low, high] = getRangeBounds(settings.rangeName);
+  const [low, high] = getRangeBounds(settings.rangeName, settings.myRange);
   return {
     clef: clefForRange(low, high),
     pitchShift: 0,
@@ -438,7 +549,7 @@ export function resolveVoiceDisplay(
 
 /** 將 PracticeSettings 轉換為 buildExercise 所需的 ExerciseOptions */
 export function toExerciseOptions(settings: PracticeSettings): ExerciseOptions {
-  const [low, high] = getRangeBounds(settings.rangeName);
+  const [low, high] = getRangeBounds(settings.rangeName, settings.myRange);
   return {
     startTonic: settings.startTonic,
     low,

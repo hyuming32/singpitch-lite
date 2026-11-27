@@ -1,13 +1,17 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { buildExercise } from '../core/exercise';
 import { displayNoteName } from './noteLabel';
 import { BUILTIN_PATTERNS, type PatternDef } from '../core/patterns';
 import {
+  MY_RANGE_NAME,
   formatBpm,
+  getRangeBounds,
   toExerciseOptions,
   type PracticeSettings,
 } from '../state/settings';
+import { patternFit, type PatternFitResult } from '../state/vocalRange';
 import { PatternCard } from './PatternCard';
+import { RangeTestSheet } from './RangeTestSheet';
 import { SettingsPanel } from './SettingsPanel';
 import { VoiceClefControls } from './VoiceClefControls';
 
@@ -60,6 +64,37 @@ export function PatternMenu({
     selectedPattern.category,
   );
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
+  const [rangeTestOpen, setRangeTestOpen] = useState(false);
+  const [outOfRangeNotice, setOutOfRangeNotice] = useState(false);
+  const outNoticeTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (outNoticeTimerRef.current !== null) {
+        window.clearTimeout(outNoticeTimerRef.current);
+      }
+    };
+  }, []);
+
+  const activeRangeBounds = useMemo(
+    () => getRangeBounds(settings.rangeName, settings.myRange),
+    [settings.rangeName, settings.myRange],
+  );
+
+  function handleSelectPattern(pat: PatternDef, fit: PatternFitResult) {
+    onUpdateSettings({ patternId: pat.id });
+    if (!fit.fits) {
+      setOutOfRangeNotice(true);
+      if (outNoticeTimerRef.current !== null) {
+        window.clearTimeout(outNoticeTimerRef.current);
+      }
+      outNoticeTimerRef.current = window.setTimeout(() => {
+        setOutOfRangeNotice(false);
+      }, 2800);
+    } else {
+      setOutOfRangeNotice(false);
+    }
+  }
 
   const categoryCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -90,7 +125,11 @@ export function PatternMenu({
     }
   }, [selectedPattern, settings]);
 
-  const mobileSummary = `${displayNoteName(settings.startTonic)} 起 · ${settings.rangeName} · ${formatBpm(settings.bpm)} BPM · ${TRANSPOSE_LABELS[settings.transpose]}`;
+  const rangeSummaryLabel =
+    settings.rangeName === MY_RANGE_NAME && settings.myRange
+      ? `我的音域（${displayNoteName(settings.myRange.low)}–${displayNoteName(settings.myRange.high)}）`
+      : settings.rangeName;
+  const mobileSummary = `${displayNoteName(settings.startTonic)} 起 · ${rangeSummaryLabel} · ${formatBpm(settings.bpm)} BPM · ${TRANSPOSE_LABELS[settings.transpose]}`;
 
   return (
     <div
@@ -147,20 +186,30 @@ export function PatternMenu({
           <p className="pattern-cat-desc">{currentCategoryInfo.description}</p>
         </header>
 
+        {outOfRangeNotice && (
+          <div className="pattern-out-toast" role="status">
+            這個音型超出目前音域
+          </div>
+        )}
+
         {visiblePatterns.length === 0 ? (
           <div className="pattern-empty-state">
             <p>尚無自訂圖案（第 6 步開放）</p>
           </div>
         ) : (
           <div className="pattern-grid">
-            {visiblePatterns.map((pat) => (
-              <PatternCard
-                key={pat.id}
-                pattern={pat}
-                selected={pat.id === selectedPattern.id}
-                onSelect={(id) => onUpdateSettings({ patternId: id })}
-              />
-            ))}
+            {visiblePatterns.map((pat) => {
+              const fit = patternFit(pat, activeRangeBounds);
+              return (
+                <PatternCard
+                  key={pat.id}
+                  pattern={pat}
+                  selected={pat.id === selectedPattern.id}
+                  fit={fit}
+                  onSelect={() => handleSelectPattern(pat, fit)}
+                />
+              );
+            })}
           </div>
         )}
       </section>
@@ -172,6 +221,7 @@ export function PatternMenu({
           settings={settings}
           onUpdate={onUpdateSettings}
           onStartPractice={onStartPractice}
+          onOpenRangeTest={() => setRangeTestOpen(true)}
         />
       </aside>
 
@@ -228,12 +278,22 @@ export function PatternMenu({
                   setMobileSheetOpen(false);
                   onStartPractice();
                 }}
+                onOpenRangeTest={() => setRangeTestOpen(true)}
                 hideStartButton
               />
             </div>
           </div>
         </div>
       )}
+
+      {/* 試唱測音域全螢幕 Sheet */}
+      <RangeTestSheet
+        open={rangeTestOpen}
+        settings={settings}
+        currentPattern={selectedPattern}
+        onApplySettings={onUpdateSettings}
+        onClose={() => setRangeTestOpen(false)}
+      />
     </div>
   );
 }

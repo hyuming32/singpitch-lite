@@ -4,6 +4,7 @@ import { BUILTIN_PATTERNS } from '../../core/patterns';
 import {
   DEFAULT_SETTINGS,
   MALE_RANGES,
+  MY_RANGE_NAME,
   NORMAL_RANGES,
   SETTINGS_STORAGE_KEY,
   clampBpm,
@@ -12,6 +13,7 @@ import {
   findLowestFeasibleTonic,
   formatBpm,
   formatExerciseSummary,
+  getRangeBounds,
   loadSettings,
   nextRepeatsPerKey,
   parseBpmInput,
@@ -346,8 +348,64 @@ describe('聲部與譜號設定（voice / maleClef / resolveVoiceDisplay）', ()
     );
     expect(patch.voice).toBe('male');
     expect(patch.rangeName).toBe('男中音');
-    // 男中音 [43, 67] 搭配大三和弦分解 (0..12)，最高可行 startTonic 為 55
-    expect(patch.startTonic).toBe(55);
+    // 男中音 [44, 68] 搭配大三和弦分解 (0..12)，最高可行 startTonic 為 56
+    expect(patch.startTonic).toBe(56);
+  });
+});
+
+describe('myRange 序列化、舊設定相容與 getRangeBounds', () => {
+  it('舊設定缺少 myRange 時為 null，且 getRangeBounds 在 myRange 為 null 時退回預設', () => {
+    const storage = createMemoryStorage({
+      [SETTINGS_STORAGE_KEY]: JSON.stringify({
+        rangeName: '我的音域',
+        bpm: 100,
+      }),
+    });
+    const loaded = loadSettings(storage);
+    expect(loaded.myRange).toBeNull();
+    expect(loaded.rangeName).toBe(DEFAULT_SETTINGS.rangeName);
+    expect(getRangeBounds(MY_RANGE_NAME, null)).toEqual([57, 81]);
+  });
+
+  it('myRange 存取來回一致，且過窄的 myRange 會被 sanitizeSettings 剔除', () => {
+    const storage = createMemoryStorage();
+    const myRange = {
+      low: 45,
+      high: 67,
+      raw: [44, 68] as [number, number],
+      method: 'twoNotes' as const,
+      voice: 'male' as const,
+      measuredAt: '2026-11-27T08:00:00.000Z',
+    };
+    saveSettings(
+      {
+        ...DEFAULT_SETTINGS,
+        rangeName: MY_RANGE_NAME,
+        voice: 'male',
+        myRange,
+      },
+      storage,
+    );
+    const loaded = loadSettings(storage);
+    expect(loaded.rangeName).toBe(MY_RANGE_NAME);
+    expect(loaded.voice).toBe('male');
+    expect(loaded.myRange).toEqual(myRange);
+    expect(getRangeBounds(MY_RANGE_NAME, loaded.myRange)).toEqual([45, 67]);
+
+    // 過窄（raw 僅 6 個半音 < 8）應被忽略
+    const tooNarrow = sanitizeSettings({
+      rangeName: MY_RANGE_NAME,
+      myRange: {
+        low: 51,
+        high: 55,
+        raw: [50, 56],
+        method: 'glide',
+        voice: 'normal',
+        measuredAt: '2026-11-27T08:00:00.000Z',
+      },
+    });
+    expect(tooNarrow.myRange).toBeNull();
+    expect(tooNarrow.rangeName).toBe(DEFAULT_SETTINGS.rangeName);
   });
 });
 

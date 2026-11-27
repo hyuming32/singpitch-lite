@@ -35,6 +35,8 @@ interface StaffViewProps {
   rightPad?: number;
   metrics: StaffVerticalMetrics;
   sung: SungPoint[];
+  /** 沒播放時的即時演唱黃線（開麥克風就顯示）；畫法與 sung 相同，稍淡 */
+  liveSung?: SungPoint[];
   countIn: { active: boolean; dots: boolean[] };
   isTablet: boolean;
 }
@@ -55,6 +57,7 @@ export function StaffView({
   rightPad = 18,
   metrics,
   sung,
+  liveSung,
   countIn,
   isTablet,
 }: StaffViewProps) {
@@ -87,12 +90,12 @@ export function StaffView({
   }, [chords, win]);
 
   // 演唱黃線 SVG path（遇到 NaN 斷開成新段落）
-  const sungPath = useMemo(() => {
-    if (!win || sung.length === 0) return '';
+  const buildSungPath = (points: SungPoint[] | undefined): string => {
+    if (!win || !points || points.length === 0) return '';
     const segments: string[] = [];
     let drawing = false;
 
-    for (const pt of sung) {
+    for (const pt of points) {
       if (!Number.isFinite(pt.midi)) {
         drawing = false;
         continue;
@@ -111,7 +114,11 @@ export function StaffView({
     }
 
     return segments.join(' ');
-  }, [win, sung, leftPad, rightEdge, activeKey, clef, baseY, stepY]);
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const sungPath = useMemo(() => buildSungPath(sung), [win, sung, leftPad, rightEdge, activeKey, clef, baseY, stepY]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const liveSungPath = useMemo(() => buildSungPath(liveSung), [win, liveSung, leftPad, rightEdge, activeKey, clef, baseY, stepY]);
 
   // 音符幾何比例（依線距計算）
   const rx = 0.65 * lineSpacing; // 寬約 1.3 × 線距
@@ -309,6 +316,20 @@ export function StaffView({
         <path
           d={sungPath}
           stroke="#e8b400"
+          strokeWidth={4}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          fill="none"
+        />
+      )}
+
+      {/* 即時演唱黃線（沒播放時） */}
+      {liveSungPath && (
+        <path
+          className="staff-live-sung"
+          d={liveSungPath}
+          stroke="#e8b400"
+          strokeOpacity={0.85}
           strokeWidth={4}
           strokeLinecap="round"
           strokeLinejoin="round"

@@ -2239,6 +2239,46 @@ button:disabled {
   width: 104px;
 }
 
+.tb-screenshot-btn {
+  width: 34px;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.transport-bar.is-tablet .tb-screenshot-btn {
+  width: 52px;
+}
+
+.screenshot-toast {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  border-radius: 999px;
+  background-color: rgba(23, 28, 38, 0.9);
+  border: 1px solid rgba(92, 218, 154, 0.55);
+  color: #edf0f7;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 30;
+}
+
+.screenshot-toast.is-error {
+  border-color: rgba(226, 75, 74, 0.75);
+  color: #ffd5d5;
+}
+
+.screenshot-toast.is-action {
+  pointer-events: auto;
+  cursor: pointer;
+  border-color: rgba(76, 164, 255, 0.8);
+  background-color: rgba(24, 34, 52, 0.96);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+
 .tb-btn.is-boundary {
   opacity: 0.45;
 }
@@ -4001,6 +4041,14 @@ button:disabled {
   height: 48px;
   border-radius: 10px;
   font-size: 18px;
+}
+
+.transport-portrait-row1 .tb-screenshot-btn {
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  padding: 0;
+  flex-shrink: 0;
 }
 
 .transport-portrait-row1 .tb-repeat-btn {

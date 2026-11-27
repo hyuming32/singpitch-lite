@@ -93,6 +93,17 @@ import {
   type PracticeDiagnosticsSnapshot,
 } from './PracticeSettingsSheet';
 import { StaffView, type SungPoint } from './StaffView';
+import {
+  freeSpan,
+  freeSungPoints,
+  pruneFreeSamples,
+  type FreeSample,
+} from './freeSung';
+import {
+  canScreenshot,
+  downloadScreenshotBlob,
+  exportPracticeScreenshot,
+} from './screenshot';
 import { TransportBar } from './TransportBar';
 
 interface PracticePageProps {
@@ -155,11 +166,21 @@ export function PracticePage({
   const [sungVersion, setSungVersion] = useState(0);
   const [confusionBubbleOpen, setConfusionBubbleOpen] = useState(false);
   const [infLoopCount, setInfLoopCount] = useState(1);
+  const [screenshotToast, setScreenshotToast] = useState<{
+    message: string;
+    isError: boolean;
+    pendingShare?: { file: File; title: string };
+  } | null>(null);
+  const screenshotToastTimerRef = useRef<number | null>(null);
 
   const micController = useMemo(() => new MicController(engine), [engine]);
   const voiceGateRef = useRef(new VoiceGate());
   const confusionRef = useRef(new ConfusionDetector());
   const rawSungRef = useRef<RawSungSample[]>([]);
+  // 沒播放時的即時演唱（牆上時間）；開麥克風就顯示黃線，不必等播放
+  const freeSungRef = useRef<FreeSample[]>([]);
+  const freeTickRef = useRef(0);
+  const [freeVersion, setFreeVersion] = useState(0);
   const recentVoiceRef = useRef<{ wallMs: number; hz: number }[]>([]);
   const recentDetectedRef = useRef<
     { wallMs: number; hz: number; midi: number }[]
@@ -728,6 +749,23 @@ export function PracticePage({
         }
       }
 
+      if (!aligned) {
+        const wall = nowWallMs / 1000;
+        freeSungRef.current.push({
+          wall,
+          midi: isVoice && Number.isFinite(shiftedMidi) ? shiftedMidi : NaN,
+        });
+        freeSungRef.current = pruneFreeSamples(freeSungRef.current, wall);
+        // 畫面更新最多每 40 ms 一次
+        if (nowWallMs - freeTickRef.current >= 40) {
+          freeTickRef.current = nowWallMs;
+          setFreeVersion((v) => v + 1);
+        }
+      } else if (freeSungRef.current.length > 0) {
+        freeSungRef.current = [];
+        setFreeVersion((v) => v + 1);
+      }
+
       if (aligned && songSec >= 0) {
         const samples = rawSungRef.current;
         const last = samples[samples.length - 1];
@@ -791,6 +829,8 @@ export function PracticePage({
   const stopMic = useCallback(async () => {
     await micController.stop().catch(() => {});
     setMicActive(false);
+    freeSungRef.current = [];
+    setFreeVersion((v) => v + 1);
     setLiveDb(null);
     setSungMidi(null);
     setCurrentCents(null);
@@ -1312,6 +1352,32 @@ export function PracticePage({
     });
   }, [lines, sungVersion, settings.a4, pitchShift]);
 
+  // 沒播放時：即時黃線畫在目前這一行播放位置右側，最新的點貼在行尾
+  const liveSungByLine = useMemo(() => {
+    const samples = freeSungRef.current;
+    if (playing || !micActive || samples.length === 0 || lines.length === 0) {
+      return lines.map(() => EMPTY_SUNG);
+    }
+    const nowWall = performance.now() / 1000;
+    const curved = singingCurve(
+      samples.map((p) => p.wall),
+      samples.map((p) => p.midi),
+      samples.map((p) => Number.isFinite(p.midi)),
+    );
+    const smooth: FreeSample[] = curved.x.map((wall, i) => ({
+      wall,
+      midi: curved.y[i]!,
+    }));
+    let currentIdx = lines.findIndex((l) => l.isCurrent);
+    if (currentIdx < 0) currentIdx = 0;
+    return lines.map((line, idx) => {
+      if (idx !== currentIdx) return EMPTY_SUNG;
+      const span = freeSpan(line.start, line.end, sec);
+      return span ? freeSungPoints(smooth, nowWall, span) : EMPTY_SUNG;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lines, freeVersion, playing, micActive, sec]);
+
   function handleDismissIosHint() {
     markIosInstallHintDismissed();
     setIosHintVisible(false);
@@ -1511,6 +1577,39 @@ export function PracticePage({
     }
   }
 
+  const showScreenshotToast = useCallback(
+    (
+      message: string,
+      isError: boolean,
+      options?: {
+        durationMs?: number;
+        pendingShare?: { file: File; title: string };
+      },
+    ) => {
+      setScreenshotToast({
+        message,
+        isError,
+        pendingShare: options?.pendingShare,
+      });
+      if (screenshotToastTimerRef.current !== null) {
+        window.clearTimeout(screenshotToastTimerRef.current);
+      }
+      screenshotToastTimerRef.current = window.setTimeout(() => {
+        screenshotToastTimerRef.current = null;
+        setScreenshotToast(null);
+      }, options?.durationMs ?? 2000);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    return () => {
+      if (screenshotToastTimerRef.current !== null) {
+        window.clearTimeout(screenshotToastTimerRef.current);
+      }
+    };
+  }, []);
+
   const selectedCount = keySelection.selectedIndices.length;
   const activeFullKeyIndex =
     tonicListIndexToFullIndex(keySelection, currentKeyIndex) ?? -1;
@@ -1532,6 +1631,111 @@ export function PracticePage({
       只練選的 {selectedCount}
     </button>
   );
+
+  const canTakeScreenshot =
+    exercise !== null && canScreenshot(playing, sec);
+
+  async function handleScreenshot() {
+    if (!canTakeScreenshot) return;
+    const svgNodes = Array.from(
+      scoreAreaRef.current?.querySelectorAll('svg.staff-svg') ?? [],
+    ) as SVGSVGElement[];
+
+    try {
+      const result = await exportPracticeScreenshot({
+        patternName: pattern.name,
+        keyLabel: tonicLabel(activeKey),
+        keyIndex: currentKeyIndex,
+        totalKeys,
+        passNum: currentPassNum,
+        repeatsPerKey: settings.repeatsPerKey,
+        phase: currentLineInfo?.phase,
+        sec,
+        jianpuMode: settings.jianpuMode,
+        scoreWidth,
+        jianpuHeight: vpLayout.jianpuHeight,
+        staffHeight,
+        isTablet,
+        isPortrait,
+        lines: renderedLines.map((item, idx) => ({
+          isCurrent: item.line.isCurrent,
+          isPreviewLine: item.isPreviewLine,
+          lineKey: item.lineKey,
+          lineTonicMidi: item.lineTonicMidi,
+          glyphs: item.glyphs,
+          activeNoteIdx: item.activeNoteIdx,
+          playheadX: item.playheadX,
+          activeNoteX: item.activeNoteX,
+          lineLabel: item.lineLabel,
+          octaveTag:
+            !item.isPreviewLine && !item.line.isSamePassContinuation
+              ? octaveTag
+              : null,
+          svgElement: svgNodes[idx] ?? null,
+        })),
+      });
+      if (result.status === 'needs-tap') {
+        showScreenshotToast('截圖已完成，點這裡分享', false, {
+          durationMs: 8000,
+          pendingShare: { file: result.file, title: result.title },
+        });
+      } else if (result.status !== 'cancelled') {
+        showScreenshotToast('已截圖', false);
+      }
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : '未知錯誤';
+      showScreenshotToast(`截圖失敗：${detail}`, true);
+    }
+  }
+
+  function handlePendingShareClick() {
+    const pending = screenshotToast?.pendingShare;
+    if (!pending) return;
+
+    if (screenshotToastTimerRef.current !== null) {
+      window.clearTimeout(screenshotToastTimerRef.current);
+      screenshotToastTimerRef.current = null;
+    }
+    setScreenshotToast(null);
+
+    if (
+      typeof navigator !== 'undefined' &&
+      typeof navigator.share === 'function'
+    ) {
+      // 必須在使用者點擊事件內同步呼叫 navigator.share，不可先 await
+      navigator
+        .share({ files: [pending.file], title: pending.title })
+        .then(() => {
+          showScreenshotToast('已截圖', false);
+        })
+        .catch((err) => {
+          if (
+            typeof err === 'object' &&
+            err !== null &&
+            'name' in err &&
+            (err as { name: unknown }).name === 'AbortError'
+          ) {
+            return;
+          }
+          try {
+            downloadScreenshotBlob(pending.file, pending.file.name);
+            showScreenshotToast('已截圖', false);
+          } catch (dlErr) {
+            const detail = dlErr instanceof Error ? dlErr.message : '未知錯誤';
+            showScreenshotToast(`截圖失敗：${detail}`, true);
+          }
+        });
+      return;
+    }
+
+    try {
+      downloadScreenshotBlob(pending.file, pending.file.name);
+      showScreenshotToast('已截圖', false);
+    } catch (dlErr) {
+      const detail = dlErr instanceof Error ? dlErr.message : '未知錯誤';
+      showScreenshotToast(`截圖失敗：${detail}`, true);
+    }
+  }
 
   return (
     <div
@@ -1664,6 +1868,25 @@ export function PracticePage({
             </div>
           )}
 
+          {screenshotToast &&
+            (screenshotToast.pendingShare ? (
+              <button
+                type="button"
+                className="screenshot-toast is-action"
+                onClick={handlePendingShareClick}
+              >
+                {screenshotToast.message}
+              </button>
+            ) : (
+              <div
+                className={`screenshot-toast ${screenshotToast.isError ? 'is-error' : ''}`}
+                role="status"
+                aria-live="polite"
+              >
+                {screenshotToast.message}
+              </div>
+            ))}
+
           {confusionBubbleOpen && (
             <div className="confusion-bubble" role="status">
               <span className="confusion-bubble-text">
@@ -1768,6 +1991,7 @@ export function PracticePage({
                   rightPad={RIGHT_PAD}
                   metrics={item.metrics}
                   sung={sungByLine[lineIdx] ?? EMPTY_SUNG}
+                  liveSung={liveSungByLine[lineIdx] ?? EMPTY_SUNG}
                   countIn={
                     item.line.isCurrent
                       ? countIn
@@ -1834,8 +2058,10 @@ export function PracticePage({
         titleHeight={portraitLayout?.patternTitleHeight}
         height={vpLayout.transportHeight}
         getSec={getExtrapolatedSec}
+        canScreenshot={canTakeScreenshot}
         onPrevKey={handlePrevKey}
         onPlayPause={handlePlayPause}
+        onScreenshot={handleScreenshot}
         onNextKey={handleNextKey}
         onCycleRepeats={handleCycleRepeats}
         onToggleMetronome={() =>

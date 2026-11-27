@@ -6,7 +6,10 @@ import {
   readIosInstallHintDismissed,
 } from '../practice/iosInstallHint';
 import { computeStaffMetrics } from '../practice/layout';
-import { computeViewportLayout } from '../practice/viewportLayout';
+import {
+  computePortraitLayout,
+  computeViewportLayout,
+} from '../practice/viewportLayout';
 
 /** 驗證五線譜（含上下加線各 2 條、音符符頭、符桿與譜號）完全落在 [0, staffHeight] 內 */
 function assertStaffFitsWithTwoLedgerLines(
@@ -228,6 +231,36 @@ describe('viewportLayout 版面高度分配', () => {
     expect(justAbove.autoCollapsed).toBe(false);
     expect(justAbove.collapsed).toBe(false);
     expect(justAbove.pianoHeight).toBe(71);
+  });
+});
+
+describe('computePortraitLayout 手機直放版面分配', () => {
+  it.each([
+    { label: '390×844 主畫面', W: 390, H: 844 },
+    { label: '390×664 Safari 有網址列', W: 390, H: 664 },
+    { label: '375×667 iPhone SE', W: 375, H: 667 },
+  ])('$label：總高 ≤ H、3 行樂譜每行 ≥ 最小行高、鋼琴 116px 且上下加線不裁切', ({ W, H }) => {
+    const layout = computePortraitLayout(W, H, {
+      top: 4,
+      bottom: 4,
+      left: 8,
+      right: 8,
+    });
+
+    expect(layout.totalHeight).toBeLessThanOrEqual(H);
+    expect(layout.headerHeight).toBe(38);
+    expect(layout.centsHeight).toBe(24);
+    expect(layout.jianpuHeight).toBe(20);
+    expect(layout.handleHeight).toBe(10);
+    expect(layout.pianoHeight).toBe(116);
+    expect(layout.collapsed).toBe(false);
+    expect(layout.patternTitleHeight).toBe(32);
+    expect(layout.transportRow1Height).toBe(48);
+    expect(layout.transportRow2Height).toBe(44);
+    expect(layout.lineCount).toBe(3);
+    expect(layout.lineHeight).toBeGreaterThanOrEqual(layout.minLineHeight);
+
+    assertStaffFitsWithTwoLedgerLines(layout.staffHeight, false, layout.sp);
   });
 });
 

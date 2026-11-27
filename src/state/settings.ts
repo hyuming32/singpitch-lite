@@ -76,7 +76,6 @@ export interface PracticeSettings {
   rangeName: string;
   bpm: number;
   noteBeats: NoteBeatsOption;
-  repeats: number;
   repeatsPerKey: RepeatsPerKeyOption;
   articulation: ArticulationOption;
   transpose: TransposeOption;
@@ -107,7 +106,6 @@ export const DEFAULT_SETTINGS: PracticeSettings = {
   rangeName: '女中音',
   bpm: 96,
   noteBeats: 1,
-  repeats: 1,
   repeatsPerKey: 2,
   articulation: 'legato',
   transpose: 'up-down',
@@ -357,7 +355,6 @@ export function sanitizeSettings(raw: unknown): PracticeSettings {
     rangeName,
     bpm: sanitizeBpm(obj.bpm, DEFAULT_SETTINGS.bpm),
     noteBeats,
-    repeats: clampInt(obj.repeats, 1, 4, DEFAULT_SETTINGS.repeats),
     repeatsPerKey,
     articulation,
     transpose,
@@ -416,7 +413,32 @@ function getDefaultStorage(): StorageLike | undefined {
   return typeof localStorage !== 'undefined' ? localStorage : undefined;
 }
 
-/** 從 localStorage 讀取設定；若格式錯誤或損毀則回傳預設值 */
+/** 若目前起始音使音型超出音域（但音域本身可容納該音型），自動改為最低可行起始音 */
+export function ensureFeasibleStartTonic(
+  settings: PracticeSettings,
+): PracticeSettings {
+  const pat =
+    BUILTIN_PATTERNS.find((p) => p.id === settings.patternId) ??
+    BUILTIN_PATTERNS[0];
+  if (!pat) {
+    return settings;
+  }
+  const [low, high] = getRangeBounds(settings.rangeName, settings.myRange);
+  const { minSemi, maxSemi } = getPatternSpan(pat);
+  if (
+    settings.startTonic + minSemi >= low &&
+    settings.startTonic + maxSemi <= high
+  ) {
+    return settings;
+  }
+  const lowest = findLowestFeasibleTonic(pat, low, high);
+  if (lowest === null || lowest === settings.startTonic) {
+    return settings;
+  }
+  return { ...settings, startTonic: lowest };
+}
+
+/** 從 localStorage 讀取設定；若格式錯誤或損毀則回傳預設值，並自動修正超界起始音 */
 export function loadSettings(storage: StorageLike | undefined = getDefaultStorage()): PracticeSettings {
   if (!storage) {
     return { ...DEFAULT_SETTINGS };
@@ -427,7 +449,7 @@ export function loadSettings(storage: StorageLike | undefined = getDefaultStorag
       return { ...DEFAULT_SETTINGS };
     }
     const parsed: unknown = JSON.parse(raw);
-    return sanitizeSettings(parsed);
+    return ensureFeasibleStartTonic(sanitizeSettings(parsed));
   } catch {
     return { ...DEFAULT_SETTINGS };
   }
@@ -503,16 +525,25 @@ export function switchVoiceSettings(
   const patch: Partial<PracticeSettings> = { voice: nextVoice };
   if (nextRange !== settings.rangeName) {
     patch.rangeName = nextRange;
-    if (pattern) {
-      const [newLow, newHigh] = getRangeBounds(nextRange, settings.myRange);
-      const clamped = clampStartTonic(
-        pattern,
-        settings.startTonic,
-        newLow,
-        newHigh,
-      );
-      if (clamped !== null && clamped !== settings.startTonic) {
-        patch.startTonic = clamped;
+  }
+  if (pattern) {
+    const [newLow, newHigh] = getRangeBounds(nextRange, settings.myRange);
+    const clamped = clampStartTonic(
+      pattern,
+      settings.startTonic,
+      newLow,
+      newHigh,
+    );
+    if (clamped !== null && clamped !== settings.startTonic) {
+      const { minSemi, maxSemi } = getPatternSpan(pattern);
+      const outOfRange =
+        settings.startTonic + minSemi < newLow ||
+        settings.startTonic + maxSemi > newHigh;
+      const lowest = outOfRange
+        ? findLowestFeasibleTonic(pattern, newLow, newHigh)
+        : clamped;
+      if (lowest !== null && lowest !== settings.startTonic) {
+        patch.startTonic = lowest;
       }
     }
   }
@@ -556,7 +587,7 @@ export function toExerciseOptions(settings: PracticeSettings): ExerciseOptions {
     high,
     bpm: settings.bpm,
     noteBeats: settings.noteBeats,
-    repeats: settings.repeats,
+    repeats: repeatsPerKeyToCount(settings.repeatsPerKey),
     articulation: settings.articulation,
     transpose: settings.transpose,
     cadence: settings.cadence,

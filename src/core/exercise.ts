@@ -32,7 +32,14 @@ export interface KeyBlock {
   tonicMidi: number;
   key: Key;
   start: number;
+  /** 該調第 1 遍音符／示範段開始時間（已跳過終止式提示和弦區段） */
+  notesStart: number;
   end: number;
+}
+
+/** 取得無限循環（∞）在單調結束後應跳回的秒數（跳過 cadence 區段） */
+export function infLoopSeekTarget(keyBlock: Pick<KeyBlock, 'start' | 'notesStart'>): number {
+  return keyBlock.notesStart;
 }
 
 export interface NoteEvent {
@@ -189,6 +196,8 @@ export function buildExercise(
       tCursor += beatSec; // 1 拍空
     }
 
+    const notesStart = tCursor;
+
     const emitPass = (pass: number, phase: 'listen' | 'sing') => {
       if (chordRomans.length > 0) {
         const chordDur = passDur / chordRomans.length;
@@ -246,6 +255,7 @@ export function buildExercise(
       tonicMidi,
       key,
       start: keyStart,
+      notesStart,
       end: tCursor,
     });
 

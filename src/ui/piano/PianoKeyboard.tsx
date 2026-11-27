@@ -26,6 +26,7 @@ interface PianoKeyboardProps {
   height: number;
   collapsed: boolean;
   isTablet: boolean;
+  isPortrait?: boolean;
   rotationCtx: RotationContext;
   engine: AudioEngine;
   onAudioError?: (msg: string) => void;
@@ -59,9 +60,17 @@ function bottomRoundedRectPath(
 export function computeWhiteKeyWidth(
   containerWidth: number,
   isTablet: boolean,
+  isPortrait = false,
 ): number {
-  const safeW = containerWidth > 0 ? containerWidth : isTablet ? 1146 : 748;
-  return safeW / (isTablet ? 22 : 19);
+  const safeW =
+    containerWidth > 0
+      ? containerWidth
+      : isTablet
+        ? 1146
+        : isPortrait
+          ? 374
+          : 748;
+  return safeW / (isTablet ? 22 : isPortrait ? 15 : 19);
 }
 
 /** 真實幾何比例 SVG 對音鋼琴：88 鍵、支援頂部捲動條、自動捲動、多指觸控與收合迷你條 */
@@ -72,6 +81,7 @@ export function PianoKeyboard({
   height,
   collapsed,
   isTablet,
+  isPortrait = false,
   rotationCtx,
   engine,
   onAudioError,
@@ -82,7 +92,7 @@ export function PianoKeyboard({
   const scrollbarRef = useRef<HTMLDivElement | null>(null);
 
   const [containerWidth, setContainerWidth] = useState(() =>
-    isTablet ? 1146 : 748,
+    isTablet ? 1146 : isPortrait ? 374 : 748,
   );
   const [scrollLeft, setScrollLeft] = useState(0);
   const [pressedMidis, setPressedMidis] = useState<Set<number>>(() => new Set());
@@ -117,7 +127,7 @@ export function PianoKeyboard({
     return () => ro.disconnect();
   }, []);
 
-  const W = computeWhiteKeyWidth(containerWidth, isTablet);
+  const W = computeWhiteKeyWidth(containerWidth, isTablet, isPortrait);
   const preset = isTablet ? 'tablet' : 'korg';
   const keyAreaHeight = collapsed
     ? Math.max(12, height)
@@ -131,8 +141,9 @@ export function PianoKeyboard({
         W,
         preset,
         height: keyAreaHeight,
+        fillHeight: isPortrait,
       }),
-    [W, preset, keyAreaHeight],
+    [W, preset, keyAreaHeight, isPortrait],
   );
 
   const maxScroll = Math.max(0, layout.totalWidth - containerWidth);
@@ -152,12 +163,13 @@ export function PianoKeyboard({
   // 初始置中至練習音域／主音
   useEffect(() => {
     if (hasInitializedScrollRef.current || containerWidth <= 0) return;
-    const cx = findKeyCenter(centerMidi);
+    const focusMidi = isPortrait ? Math.min(108, centerMidi + 5) : centerMidi;
+    const cx = findKeyCenter(focusMidi);
     if (cx !== null) {
       hasInitializedScrollRef.current = true;
       setScrollLeft(Math.max(0, Math.min(maxScroll, cx - containerWidth / 2)));
     }
-  }, [centerMidi, containerWidth, findKeyCenter, maxScroll]);
+  }, [centerMidi, containerWidth, findKeyCenter, isPortrait, maxScroll]);
 
   // 平滑捲動動畫
   const smoothScrollTo = useCallback(
@@ -198,6 +210,36 @@ export function PianoKeyboard({
       }
     };
   }, []);
+
+  // 換調時若主音超出可視區，自動將兩個八度捲至目前調範圍
+  const prevCenterMidiRef = useRef(centerMidi);
+  useEffect(() => {
+    if (prevCenterMidiRef.current === centerMidi) return;
+    prevCenterMidiRef.current = centerMidi;
+    if (
+      !hasInitializedScrollRef.current ||
+      targetMidi !== null ||
+      scrollDragRef.current !== null
+    ) {
+      return;
+    }
+    const focusMidi = isPortrait ? Math.min(108, centerMidi + 5) : centerMidi;
+    const cx = findKeyCenter(focusMidi);
+    if (cx === null) return;
+    const safeLeft = clampedScrollLeft + containerWidth * 0.2;
+    const safeRight = clampedScrollLeft + containerWidth * 0.8;
+    if (cx < safeLeft || cx > safeRight) {
+      smoothScrollTo(cx - containerWidth / 2);
+    }
+  }, [
+    centerMidi,
+    targetMidi,
+    isPortrait,
+    containerWidth,
+    clampedScrollLeft,
+    findKeyCenter,
+    smoothScrollTo,
+  ]);
 
   // 練唱中自動捲動：目標音離開窗口中間 60% 時，平滑捲動回中間
   useEffect(() => {
@@ -529,17 +571,36 @@ export function PianoKeyboard({
                   fill={shadowColor}
                 />
                 {showLabels && isC && (
-                  <text
-                    x={wk.x + wk.w / 2}
-                    y={wk.len - shadowH - 5}
-                    textAnchor="middle"
-                    fontSize={isTablet ? 11 : 9.5}
-                    fontWeight="700"
-                    fill={isTarget ? '#ffffff' : '#5f6470'}
-                    pointerEvents="none"
-                  >
-                    {displayNoteName(wk.midi)}
-                  </text>
+                  wk.midi === 60 ? (
+                    <text
+                      x={wk.x + wk.w / 2}
+                      y={wk.len - shadowH - 13}
+                      textAnchor="middle"
+                      fontSize={isTablet ? 10.5 : 8}
+                      fontWeight="700"
+                      fill={isTarget ? '#ffffff' : '#1d4ed8'}
+                      pointerEvents="none"
+                    >
+                      <tspan x={wk.x + wk.w / 2} dy="0">
+                        {displayNoteName(wk.midi)}
+                      </tspan>
+                      <tspan x={wk.x + wk.w / 2} dy="9">
+                        中央Do
+                      </tspan>
+                    </text>
+                  ) : (
+                    <text
+                      x={wk.x + wk.w / 2}
+                      y={wk.len - shadowH - 5}
+                      textAnchor="middle"
+                      fontSize={isTablet ? 11 : 9.5}
+                      fontWeight="700"
+                      fill={isTarget ? '#ffffff' : '#5f6470'}
+                      pointerEvents="none"
+                    >
+                      {displayNoteName(wk.midi)}
+                    </text>
+                  )
                 )}
               </g>
             );

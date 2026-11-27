@@ -72,4 +72,24 @@ describe('pianoGeometry', () => {
       6,
     );
   });
+
+  it('fillHeight=true 時白鍵填滿容器高度，黑鍵依比例縮放（無下方空白）', () => {
+    const W = 24.93;
+    const h = 104;
+    const layout = layoutKeyboard({
+      lowMidi: 21,
+      highMidi: 108,
+      W,
+      preset: 'korg',
+      height: h,
+      fillHeight: true,
+    });
+
+    expect(layout.whiteLen).toBe(h);
+    expect(layout.whites[0]!.len).toBe(h);
+    expect(layout.blackLen).toBeCloseTo(
+      PIANO_PRESETS.korg.blackLengthRatio * h,
+      6,
+    );
+  });
 });

@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { BUILTIN_PATTERNS } from '../../core/patterns';
 import {
+  VOCAL_RANGE_PARTS,
   buildMeasuredRangeResult,
   patternFit,
   rankPatternsForRange,
   recommendVoiceRange,
   resolveStartTonicForRange,
+  selectVocalRangePatch,
 } from '../vocalRange';
 
 describe('recommendVoiceRange 推薦聲部演算法', () => {
@@ -22,11 +24,41 @@ describe('recommendVoiceRange 推薦聲部演算法', () => {
   });
 
   it('重疊比例同分時以中心距最近者勝出', () => {
-    // 48–64 (中心 56)：與男低音 [40,64]、男中音 [44,68]、男高音 [48,72] 重疊皆為 16/24
-    // 中心距分別為 |56-52|=4、|56-56|=0、|56-60|=4 → 應選男中音
-    const rec = recommendVoiceRange(48, 64);
-    expect(rec.rangeName).toBe('男中音');
-    expect(rec.voice).toBe('male');
+    // 60–72 (中心 66)：與男高音 [48,72]、女低音 [53,77]、女中音 [57,81]、女高音 [60,84] 重疊皆為 12/24
+    // 中心距分別為 |66-60|=6、|66-65|=1、|66-69|=3、|66-72|=6 → 應選女低音
+    const rec = recommendVoiceRange(60, 72);
+    expect(rec.rangeName).toBe('女低音');
+    expect(rec.voice).toBe('normal');
+  });
+
+  it('六個標準音域皆具備英文名稱欄位且選擇音域時自動更新聲部', () => {
+    expect(VOCAL_RANGE_PARTS.map((p) => p.englishName)).toEqual([
+      'BASS',
+      'BARITONE',
+      'TENOR',
+      'CONTRALTO',
+      'MEZZO SOPRANO',
+      'SOPRANO',
+    ]);
+
+    const majorArp = BUILTIN_PATTERNS.find((p) => p.id === 'major-arpeggio')!;
+    const malePatch = selectVocalRangePatch(
+      { startTonic: 65, myRange: null },
+      '男中音',
+      majorArp,
+    );
+    expect(malePatch.rangeName).toBe('男中音');
+    expect(malePatch.voice).toBe('male');
+    expect(malePatch.startTonic).toBe(45);
+
+    const femalePatch = selectVocalRangePatch(
+      { startTonic: 45, myRange: null },
+      '女低音',
+      majorArp,
+    );
+    expect(femalePatch.rangeName).toBe('女低音');
+    expect(femalePatch.voice).toBe('normal');
+    expect(femalePatch.startTonic).toBe(53);
   });
 });
 

@@ -1,5 +1,7 @@
 import {
   PIANO_COLLAPSE_THRESHOLD,
+  PORTRAIT_DEFAULT_PIANO_HEIGHT,
+  PORTRAIT_MIN_LINE_HEIGHT,
   clampPianoHeight,
   defaultPianoHeight,
   handleBarHeight,
@@ -230,5 +232,237 @@ export function computeViewportLayout(
     maxPianoHeight,
     collapsed,
     autoCollapsed,
+  };
+}
+
+export interface PortraitSafeArea {
+  top?: number;
+  bottom?: number;
+  left?: number;
+  right?: number;
+  x?: number;
+  y?: number;
+}
+
+export interface PortraitLayoutOptions {
+  collapsedPref?: PianoCollapsedPref;
+  preferredPianoHeight?: number | null;
+  overridePianoHeight?: number | null;
+}
+
+export interface PortraitLayoutResult {
+  viewportWidth: number;
+  viewportHeight: number;
+  safePaddingY: number;
+  safePaddingX: number;
+  headerHeight: number;
+  patternTitleHeight: number;
+  transportRow1Height: number;
+  transportRow2Height: number;
+  transportGap: number;
+  transportHeight: number;
+  workspaceHeight: number;
+  sheetPaperHeight: number;
+  centsHeight: number;
+  scoreAreaHeight: number;
+  lineHeight: number;
+  minLineHeight: number;
+  jianpuHeight: number;
+  staffHeight: number;
+  sp: number;
+  stepY: number;
+  lineCount: 1 | 2 | 3;
+  handleHeight: number;
+  pianoHeight: number;
+  whiteKeyWidth: number;
+  autoCollapseThreshold: number;
+  maxPianoHeight: number;
+  collapsed: boolean;
+  autoCollapsed: boolean;
+  /** 各區塊與間距的總高度（應 <= viewportHeight） */
+  totalHeight: number;
+}
+
+/** 純函式計算手機直放練唱版面各區塊高度（含 3 行樂譜與兩排播放列） */
+export function computePortraitLayout(
+  width: number,
+  height: number,
+  safe?: PortraitSafeArea,
+  options: PortraitLayoutOptions = {},
+): PortraitLayoutResult {
+  const viewportWidth =
+    Number.isFinite(width) && width > 0 ? Math.round(width) : 390;
+  const viewportHeight =
+    Number.isFinite(height) && height > 0 ? Math.round(height) : 844;
+
+  const safePaddingY =
+    safe?.y !== undefined && Number.isFinite(safe.y)
+      ? Math.max(0, Math.round(safe.y))
+      : safe && (safe.top !== undefined || safe.bottom !== undefined)
+        ? Math.max(0, Math.round((safe.top ?? 0) + (safe.bottom ?? 0)))
+        : 8;
+  const safePaddingX =
+    safe?.x !== undefined && Number.isFinite(safe.x)
+      ? Math.max(0, Math.round(safe.x))
+      : safe && (safe.left !== undefined || safe.right !== undefined)
+        ? Math.max(0, Math.round((safe.left ?? 0) + (safe.right ?? 0)))
+        : 16;
+
+  const headerHeight = 38;
+  const centsHeight = 24;
+  const jianpuHeight = 20;
+  const handleHeight = handleBarHeight(false); // 10
+  const miniPianoH = miniPianoHeight(false); // 18
+  const defaultPianoH = PORTRAIT_DEFAULT_PIANO_HEIGHT; // 116
+  const patternTitleHeight = 32;
+  const transportRow1Height = 48;
+  const transportRow2Height = 44;
+  const transportGap = 4;
+  const transportHeight =
+    transportRow1Height + transportGap + transportRow2Height; // 96
+
+  const pageGap = 4;
+  const wsGap = 4;
+  const sheetPadY = 4;
+  const minLineHeight = PORTRAIT_MIN_LINE_HEIGHT; // 88
+
+  // 頁面直向四塊：header + workspace + patternTitle + transport（共 3 個 pageGap）
+  const workspaceHeight = Math.max(
+    0,
+    viewportHeight -
+      safePaddingY -
+      headerHeight -
+      patternTitleHeight -
+      transportHeight -
+      pageGap * 3,
+  );
+  const availableSheetPlusPiano = Math.max(
+    0,
+    workspaceHeight - handleHeight - wsGap * 2,
+  );
+
+  const contentWidth = Math.max(240, viewportWidth - safePaddingX);
+  const whiteKeyWidth = contentWidth / 15; // 2 個八度（15 個白鍵 C–C）
+  const autoCollapseThreshold = whiteKeyWidth * 1.8;
+
+  // 優先保留 3 行最小高度 + 2px 分隔線 + cents 色條
+  const minPreferredSheetPaperH =
+    sheetPadY + centsHeight + minLineHeight * 3 + 2;
+  const minUnclippedStaffH = 66;
+  const minUnclippedSheetPaperH =
+    sheetPadY + centsHeight + jianpuHeight + minUnclippedStaffH;
+  const strictMaxPianoH = Math.max(
+    0,
+    availableSheetPlusPiano - minUnclippedSheetPaperH,
+  );
+
+  const collapsedPref = options.collapsedPref ?? 'auto';
+  const preferredPianoH = options.preferredPianoHeight ?? null;
+  const overridePianoH = options.overridePianoHeight ?? null;
+
+  let collapsed = false;
+  let autoCollapsed = false;
+  let pianoHeight = miniPianoH;
+  let maxPianoHeight = Math.max(PIANO_COLLAPSE_THRESHOLD, strictMaxPianoH);
+
+  if (
+    overridePianoH !== undefined &&
+    overridePianoH !== null &&
+    Number.isFinite(overridePianoH)
+  ) {
+    maxPianoHeight = Math.max(PIANO_COLLAPSE_THRESHOLD, strictMaxPianoH);
+    pianoHeight = clampPianoHeight(overridePianoH, maxPianoHeight);
+    collapsed = false;
+    autoCollapsed = false;
+  } else if (collapsedPref === 'collapsed') {
+    collapsed = true;
+    autoCollapsed = false;
+    pianoHeight = miniPianoH;
+  } else if (collapsedPref === 'expanded') {
+    if (strictMaxPianoH < PIANO_COLLAPSE_THRESHOLD) {
+      collapsed = true;
+      autoCollapsed = true;
+      pianoHeight = miniPianoH;
+    } else {
+      collapsed = false;
+      autoCollapsed = false;
+      maxPianoHeight = strictMaxPianoH;
+      const targetPiano = preferredPianoH ?? defaultPianoH;
+      pianoHeight = clampPianoHeight(targetPiano, maxPianoHeight);
+    }
+  } else {
+    const remainingForPiano = availableSheetPlusPiano - minPreferredSheetPaperH;
+    if (remainingForPiano < autoCollapseThreshold) {
+      autoCollapsed = true;
+      collapsed = true;
+      pianoHeight = miniPianoH;
+    } else {
+      autoCollapsed = false;
+      collapsed = false;
+      maxPianoHeight = remainingForPiano;
+      const targetPiano = preferredPianoH ?? defaultPianoH;
+      pianoHeight = clampPianoHeight(targetPiano, maxPianoHeight);
+    }
+  }
+
+  const sheetPaperHeight = Math.max(0, availableSheetPlusPiano - pianoHeight);
+  const scoreAreaHeight = Math.max(
+    0,
+    sheetPaperHeight - sheetPadY - centsHeight,
+  );
+
+  let lineCount: 1 | 2 | 3 = 1;
+  if (scoreAreaHeight >= minLineHeight * 3 + 2) {
+    lineCount = 3;
+  } else if (scoreAreaHeight >= minLineHeight * 2 + 1) {
+    lineCount = 2;
+  }
+
+  const lineBorders = lineCount - 1;
+  const lineHeight = Math.floor((scoreAreaHeight - lineBorders) / lineCount);
+  const staffHeight = Math.max(40, lineHeight - jianpuHeight);
+  const { sp, stepY } = computeSpFromStaffHeight(staffHeight, false);
+
+  const totalHeight =
+    safePaddingY +
+    headerHeight +
+    sheetPaperHeight +
+    handleHeight +
+    pianoHeight +
+    wsGap * 2 +
+    patternTitleHeight +
+    transportHeight +
+    pageGap * 3;
+
+  return {
+    viewportWidth,
+    viewportHeight,
+    safePaddingY,
+    safePaddingX,
+    headerHeight,
+    patternTitleHeight,
+    transportRow1Height,
+    transportRow2Height,
+    transportGap,
+    transportHeight,
+    workspaceHeight,
+    sheetPaperHeight,
+    centsHeight,
+    scoreAreaHeight,
+    lineHeight,
+    minLineHeight,
+    jianpuHeight,
+    staffHeight,
+    sp,
+    stepY,
+    lineCount,
+    handleHeight,
+    pianoHeight,
+    whiteKeyWidth,
+    autoCollapseThreshold,
+    maxPianoHeight,
+    collapsed,
+    autoCollapsed,
+    totalHeight,
   };
 }

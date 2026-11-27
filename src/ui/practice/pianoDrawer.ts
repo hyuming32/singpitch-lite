@@ -6,6 +6,12 @@ export function defaultPianoHeight(isTablet: boolean): number {
   return isTablet ? 250 : 130;
 }
 
+/** 手機直放模式預設鋼琴高度（px） */
+export const PORTRAIT_DEFAULT_PIANO_HEIGHT = 116;
+
+/** 手機直放模式單行樂譜最小高度（px） */
+export const PORTRAIT_MIN_LINE_HEIGHT = 88;
+
 /** 依裝置類型取得收合後的迷你鍵盤高度（px） */
 export function miniPianoHeight(isTablet: boolean): number {
   return isTablet ? 24 : 18;

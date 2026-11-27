@@ -8,8 +8,6 @@ import { AudioProvider } from './AudioContext';
 import { ErrorBoundary } from './ErrorBoundary';
 import { PatternMenu } from './PatternMenu';
 import { PracticePage } from './practice/PracticePage';
-import { usePracticeViewport } from './practice/usePracticeViewport';
-import { isPortraitPhoneViewport } from './practice/viewportRotation';
 
 type AppRoute = 'scale' | 'practice' | 'midi' | 'log';
 
@@ -43,16 +41,6 @@ export function AppShell() {
   const [settings, setSettings] = useState<PracticeSettings>(() => loadSettings());
   const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
   const [customNoticeOpen, setCustomNoticeOpen] = useState(false);
-  const [practiceInputActive, setPracticeInputActive] = useState(false);
-  const viewport = usePracticeViewport(
-    route === 'practice' && practiceInputActive,
-  );
-
-  useEffect(() => {
-    if (route !== 'practice') {
-      setPracticeInputActive(false);
-    }
-  }, [route]);
 
   useEffect(() => {
     if (!window.location.hash) {
@@ -81,33 +69,13 @@ export function AppShell() {
   }, []);
 
   if (route === 'practice') {
-    const isPracticeRotated = isPortraitPhoneViewport(
-      viewport.width,
-      viewport.height,
-    );
     return (
       <AudioProvider>
-        <div
-          className={`app-shell is-practice ${isPracticeRotated ? 'is-rotated' : ''}`}
-          style={
-            isPracticeRotated
-              ? {
-                  position: 'fixed',
-                  left: 0,
-                  top: 0,
-                  width: `${viewport.height}px`,
-                  height: `${viewport.width}px`,
-                  transformOrigin: '0 0',
-                  transform: 'translate(100vw, 0) rotate(90deg)',
-                }
-              : undefined
-          }
-        >
+        <div className="app-shell is-practice">
           <ErrorBoundary label="PracticePage">
             <PracticePage
               settings={settings}
               onUpdateSettings={handleUpdateSettings}
-              onInputActiveChange={setPracticeInputActive}
               onBack={() => navigateTo('scale')}
             />
           </ErrorBoundary>

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { KeyBlock } from '../../core/exercise';
 import { tonicLabel } from './layout';
 import {
@@ -16,6 +16,8 @@ interface KeyStripProps {
   onlySelected: boolean;
   selectedIndices: readonly number[];
   isTablet: boolean;
+  isPortrait?: boolean;
+  leadingSlot?: ReactNode;
   rotationCtx: RotationContext;
   onToggleKey: (fullKeyIndex: number) => void;
   onJumpToKey: (fullKeyIndex: number) => void;
@@ -52,6 +54,8 @@ export function KeyStrip({
   onlySelected,
   selectedIndices,
   isTablet,
+  isPortrait = false,
+  leadingSlot,
   rotationCtx,
   onToggleKey,
   onJumpToKey,
@@ -291,13 +295,16 @@ export function KeyStrip({
   }
 
   return (
-    <div className={`key-strip-wrap ${isTablet ? 'is-tablet' : ''}`}>
+    <div
+      className={`key-strip-wrap ${isTablet ? 'is-tablet' : ''} ${isPortrait ? 'is-portrait' : ''}`}
+    >
       <div
         ref={stripRef}
         className={`key-strip ${dragState ? 'is-dragging' : ''}`}
         role="list"
         aria-label="調名清單"
       >
+        {leadingSlot}
         {keys.map((kb, idx) => {
           const isCurrent = idx === activeFullKeyIndex;
           const orderIdx = getOrderIdx(idx);

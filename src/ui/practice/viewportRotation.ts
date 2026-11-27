@@ -28,6 +28,7 @@ export interface LocalRect {
 export interface ResolvedPracticeViewport {
   rotated: boolean;
   isPhone: boolean;
+  isPortrait: boolean;
   isTablet: boolean;
   device: PracticeDevice;
   layoutWidth: number;
@@ -52,7 +53,7 @@ export function isPhoneViewport(width: number, height: number): boolean {
   return Math.min(width, height) < 600;
 }
 
-/** 判斷目前視窗是否為需旋轉 90° 的直立手機畫面 */
+/** 判斷目前視窗是否為直立手機畫面 */
 export function isPortraitPhoneViewport(
   width: number,
   height: number,
@@ -60,7 +61,7 @@ export function isPortraitPhoneViewport(
   return isPhoneViewport(width, height) && height > width;
 }
 
-/** 取得目前旋轉後的版面寬高、裝置類型與旋轉狀態 */
+/** 取得目前版面寬高、裝置類型與直／橫向狀態（不再進行 90° 畫面旋轉） */
 export function resolvePracticeViewport(
   viewport: ViewportSize,
 ): ResolvedPracticeViewport;
@@ -81,75 +82,43 @@ export function resolvePracticeViewport(
       ? (heightArg ?? 390)
       : widthOrViewport.height;
   const isPhone = isPhoneViewport(width, height);
-  const rotated = isPhone && height > width;
+  const isPortrait = isPhone && height > width;
   const isTablet = !isPhone;
   return {
-    rotated,
+    rotated: false,
     isPhone,
+    isPortrait,
     isTablet,
     device: isPhone ? 'phone' : 'tablet',
-    layoutWidth: rotated ? height : width,
-    layoutHeight: rotated ? width : height,
+    layoutWidth: width,
+    layoutHeight: height,
     rotationCtx: {
-      rotated,
+      rotated: false,
       viewportWidth: width,
     },
   };
 }
 
-function defaultRotationContext(): RotationContext {
-  if (typeof window === 'undefined') {
-    return { rotated: false, viewportWidth: 844 };
-  }
-  const vp = readViewportSize();
-  return {
-    rotated: isPortraitPhoneViewport(vp.width, vp.height),
-    viewportWidth: vp.width,
-  };
-}
-
-/**
- * 將螢幕 client 座標轉換為練唱頁容器內的局部座標：
- * - 未旋轉：{ x: clientX, y: clientY }
- * - 直立手機順時針 90°（逆時針拿橫時為正）旋轉：{ x: clientY, y: viewportWidth - clientX }
- */
+/** 將螢幕 client 座標轉換為局部座標（已取消畫面旋轉，保留函式介面並回傳恆等座標） */
 export function toLocalPoint(
   clientX: number,
   clientY: number,
-  ctx: RotationContext = defaultRotationContext(),
+  _ctx?: RotationContext,
 ): LocalPoint {
-  if (!ctx.rotated) {
-    return { x: clientX, y: clientY };
-  }
-  return {
-    x: clientY,
-    y: ctx.viewportWidth - clientX,
-  };
+  return { x: clientX, y: clientY };
 }
 
-/** 將 getBoundingClientRect() 的螢幕矩形換算為容器內的局部座標矩形 */
+/** 將 DOMRect 換算為局部座標矩形（已取消畫面旋轉，保留函式介面並回傳原值） */
 export function toLocalRect(
   rect: Pick<DOMRect, 'left' | 'top' | 'right' | 'bottom' | 'width' | 'height'>,
-  ctx: RotationContext = defaultRotationContext(),
+  _ctx?: RotationContext,
 ): LocalRect {
-  if (!ctx.rotated) {
-    return {
-      left: rect.left,
-      top: rect.top,
-      right: rect.right,
-      bottom: rect.bottom,
-      width: rect.width,
-      height: rect.height,
-    };
-  }
-  const tl = toLocalPoint(rect.right, rect.top, ctx);
-  const br = toLocalPoint(rect.left, rect.bottom, ctx);
   return {
-    left: tl.x,
-    top: tl.y,
-    right: br.x,
-    bottom: br.y,
-    width: br.x - tl.x,
-    height: br.y - tl.y,
+    left: rect.left,
+    top: rect.top,
+    right: rect.right,
+    bottom: rect.bottom,
+    width: rect.width,
+    height: rect.height,
   };
 }

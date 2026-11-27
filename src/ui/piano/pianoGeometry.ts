@@ -91,6 +91,8 @@ export interface LayoutKeyboardOptions {
   preset?: PianoPresetName;
   /** 容器可用高度（若小於理論白鍵長，從白鍵前端裁掉並限制黑鍵長度） */
   height?: number;
+  /** 若為 true 且提供 height，白鍵強制填滿容器高度，黑鍵依黑鍵比例計算 */
+  fillHeight?: boolean;
 }
 
 /** 計算目標 C 音相對於 lowMidi 的白鍵格數偏移（可為負，用於 A0 等非 C 起點） */
@@ -118,16 +120,22 @@ export function layoutKeyboard(
     W = 1.0,
     preset = 'real',
     height,
+    fillHeight = false,
   } = options;
 
   const spec = PIANO_PRESETS[preset];
   const theoreticalWhiteLen = spec.aspectRatio * W;
   const whiteLen =
     height !== undefined && Number.isFinite(height)
-      ? Math.max(0, Math.min(theoreticalWhiteLen, height))
+      ? fillHeight
+        ? Math.max(0, height)
+        : Math.max(0, Math.min(theoreticalWhiteLen, height))
       : theoreticalWhiteLen;
 
-  const rawBlackLen = spec.blackLengthRatio * theoreticalWhiteLen;
+  const rawBlackLen =
+    fillHeight && height !== undefined && Number.isFinite(height)
+      ? spec.blackLengthRatio * whiteLen
+      : spec.blackLengthRatio * theoreticalWhiteLen;
   const blackLen =
     height !== undefined && Number.isFinite(height)
       ? Math.max(0, Math.min(rawBlackLen, 0.75 * height))

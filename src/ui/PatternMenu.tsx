@@ -9,11 +9,11 @@ import {
   toExerciseOptions,
   type PracticeSettings,
 } from '../state/settings';
-import { patternFit, type PatternFitResult } from '../state/vocalRange';
+import { patternFit, resolveStartTonicForRange, type PatternFitResult } from '../state/vocalRange';
 import { PatternCard } from './PatternCard';
 import { RangeTestSheet } from './RangeTestSheet';
 import { SettingsPanel } from './SettingsPanel';
-import { VoiceClefControls } from './VoiceClefControls';
+import { VocalRangeCard } from './VocalRangeCard';
 
 export interface CategoryInfo {
   id: string;
@@ -82,7 +82,17 @@ export function PatternMenu({
   );
 
   function handleSelectPattern(pat: PatternDef, fit: PatternFitResult) {
-    onUpdateSettings({ patternId: pat.id });
+    const [low, high] = activeRangeBounds;
+    const nextStart = resolveStartTonicForRange(
+      pat,
+      settings.startTonic,
+      low,
+      high,
+    );
+    onUpdateSettings({
+      patternId: pat.id,
+      ...(nextStart !== settings.startTonic ? { startTonic: nextStart } : {}),
+    });
     if (!fit.fits) {
       setOutOfRangeNotice(true);
       if (outNoticeTimerRef.current !== null) {
@@ -132,24 +142,7 @@ export function PatternMenu({
   const mobileSummary = `${displayNoteName(settings.startTonic)} 起 · ${rangeSummaryLabel} · ${formatBpm(settings.bpm)} BPM · ${TRANSPOSE_LABELS[settings.transpose]}`;
 
   return (
-    <div
-      className={`pattern-menu ${settings.voice === 'male' ? 'has-male-clef' : ''}`}
-    >
-      {/* 手機版橫向膠囊分類列 */}
-      <nav className="mobile-cat-pills" aria-label="練習分類">
-        {PATTERN_CATEGORIES.map((cat) => (
-          <button
-            key={cat.id}
-            type="button"
-            className={`cat-pill ${activeCategory === cat.id ? 'is-active' : ''}`}
-            onClick={() => setActiveCategory(cat.id)}
-          >
-            <span>{cat.label}</span>
-            <span className="cat-pill-count">{categoryCounts[cat.id] ?? 0}</span>
-          </button>
-        ))}
-      </nav>
-
+    <div className="pattern-menu">
       {/* 平板／桌面左側分類欄 */}
       <aside className="cat-sidebar" aria-label="練習分類">
         <div className="cat-list">
@@ -179,8 +172,30 @@ export function PatternMenu({
         )}
       </aside>
 
-      {/* 中間圖案卡片區 */}
+      {/* 中間圖案卡片區（手機最上方含我的音域卡片＋分類膠囊；iPad 左欄最上方含我的音域卡片全寬） */}
       <section className="pattern-main">
+        <VocalRangeCard
+          settings={settings}
+          pattern={selectedPattern}
+          onUpdate={onUpdateSettings}
+          onOpenRangeTest={() => setRangeTestOpen(true)}
+        />
+
+        {/* 手機版橫向膠囊分類列 */}
+        <nav className="mobile-cat-pills" aria-label="練習分類">
+          {PATTERN_CATEGORIES.map((cat) => (
+            <button
+              key={cat.id}
+              type="button"
+              className={`cat-pill ${activeCategory === cat.id ? 'is-active' : ''}`}
+              onClick={() => setActiveCategory(cat.id)}
+            >
+              <span>{cat.label}</span>
+              <span className="cat-pill-count">{categoryCounts[cat.id] ?? 0}</span>
+            </button>
+          ))}
+        </nav>
+
         <header className="pattern-main-header">
           <h2 className="pattern-cat-title">{currentCategoryInfo.label}</h2>
           <p className="pattern-cat-desc">{currentCategoryInfo.description}</p>
@@ -225,13 +240,8 @@ export function PatternMenu({
         />
       </aside>
 
-      {/* 手機版底部固定區（聲部／譜號 + 摘要 + 開始練唱） */}
+      {/* 手機版底部固定區（摘要 + 開始練唱） */}
       <div className="mobile-bottom-bar">
-        <VoiceClefControls
-          settings={settings}
-          pattern={selectedPattern}
-          onUpdate={onUpdateSettings}
-        />
         <button
           type="button"
           className="mobile-summary-btn"
@@ -246,7 +256,7 @@ export function PatternMenu({
           disabled={hasRangeError}
           onClick={onStartPractice}
         >
-          {hasRangeError ? '請先調整設定（超出音域）' : '開始練唱（建議橫放）'}
+          {hasRangeError ? '請先調整設定（超出音域）' : '開始練唱'}
         </button>
       </div>
 

@@ -67,7 +67,7 @@ export interface RangeChartProps {
   liveSungMidi?: number | null;
   /** 僅顯示上方鋼琴鍵盤與黃色指針（試唱測音域中用） */
   keyboardOnly?: boolean;
-  /** 是否顯示「完整 (C1–C5)」切換鈕 */
+  /** 是否顯示「完整 (C2–C6)」切換鈕 */
   showFullRangeOption?: boolean;
   /** 結果頁標記的推薦聲部名稱 */
   recommendedRangeName?: string | null;
@@ -205,7 +205,7 @@ export function RangeChart({
           />
         )}
 
-        {/* C1..C5 標記 */}
+        {/* C2..C6 標記 */}
         <div className="range-kbd-c-labels" aria-hidden="true">
           {cKeys.map((c) => (
             <span

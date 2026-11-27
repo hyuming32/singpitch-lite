@@ -68,6 +68,7 @@ describe('settings', () => {
       bpm: 10,
       noteBeats: 3,
       repeats: 9,
+      repeatsPerKey: 99,
       articulation: 'marcato',
       transpose: 'down',
       mode: 'karaoke',
@@ -85,7 +86,8 @@ describe('settings', () => {
     expect(sanitized.rangeName).toBe(DEFAULT_SETTINGS.rangeName);
     expect(sanitized.bpm).toBe(40);
     expect(sanitized.noteBeats).toBe(DEFAULT_SETTINGS.noteBeats);
-    expect(sanitized.repeats).toBe(4);
+    expect(sanitized.repeatsPerKey).toBe(DEFAULT_SETTINGS.repeatsPerKey);
+    expect('repeats' in sanitized).toBe(false);
     expect(sanitized.articulation).toBe(DEFAULT_SETTINGS.articulation);
     expect(sanitized.transpose).toBe(DEFAULT_SETTINGS.transpose);
     expect(sanitized.mode).toBe(DEFAULT_SETTINGS.mode);
@@ -103,12 +105,12 @@ describe('settings', () => {
     const custom: PracticeSettings = {
       ...DEFAULT_SETTINGS,
       patternId: 'major-arpeggio',
-      startTonic: 55,
+      startTonic: 48,
       voice: 'male',
       rangeName: '男中音',
       bpm: 120,
       noteBeats: 2,
-      repeats: 3,
+      repeatsPerKey: 3,
       articulation: 'staccato',
       transpose: 'up',
       mode: 'follow',
@@ -142,7 +144,7 @@ describe('toExerciseOptions 與摘要', () => {
       startTonic: 60, // C4
       bpm: 100,
       noteBeats: 0.5,
-      repeats: 2,
+      repeatsPerKey: 2,
       articulation: 'staccato',
       transpose: 'up-down',
       cadence: false,
@@ -165,6 +167,10 @@ describe('toExerciseOptions 與摘要', () => {
       mode: 'follow',
     });
 
+    // repeatsPerKey 統一映射到 ExerciseOptions.repeats（'inf' 時建立 1 遍）
+    expect(toExerciseOptions({ ...settings, repeatsPerKey: 5 }).repeats).toBe(5);
+    expect(toExerciseOptions({ ...settings, repeatsPerKey: 'inf' }).repeats).toBe(1);
+
     // 男高音 high=72，大三和弦分解最高音為 +12 半音，C4(60)+12=72 僅能容納 1 個調
     const ex = buildExercise(majorArpeggio, opts);
     expect(ex.keys).toHaveLength(1);
@@ -172,7 +178,7 @@ describe('toExerciseOptions 與摘要', () => {
 
     const summary = formatExerciseSummary(ex, settings.transpose);
     expect(summary).toContain('1 個調');
-    expect(summary).toContain('C3') // 中央 Do 顯示為 C3;
+    expect(summary).toContain('C4'); // 中央 Do 顯示為 C4
   });
 });
 
@@ -217,7 +223,11 @@ describe('每調重複次數循環與舊設定相容', () => {
     });
     const loaded = loadSettings(storage);
     expect(loaded.repeatsPerKey).toBe(2);
+    expect('repeats' in loaded).toBe(false);
     expect(sanitizeSettings({ repeatsPerKey: 99 }).repeatsPerKey).toBe(2);
+    expect(
+      sanitizeSettings({ repeats: 4, repeatsPerKey: 5 }).repeatsPerKey,
+    ).toBe(5);
   });
 });
 
@@ -348,8 +358,8 @@ describe('聲部與譜號設定（voice / maleClef / resolveVoiceDisplay）', ()
     );
     expect(patch.voice).toBe('male');
     expect(patch.rangeName).toBe('男中音');
-    // 男中音 [44, 68] 搭配大三和弦分解 (0..12)，最高可行 startTonic 為 56
-    expect(patch.startTonic).toBe(56);
+    // 男中音 [45, 65] 搭配大三和弦分解 (0..12)，原 65 超出音域 → 自動調整為最低可行 startTonic 45
+    expect(patch.startTonic).toBe(45);
   });
 });
 
@@ -466,5 +476,41 @@ describe('BPM 小數存取、解析、格式化與 ±1 步進', () => {
     expect(stepBpm(72.3, 1)).toBe(73.3);
     expect(stepBpm(207.5, 1)).toBe(208);
     expect(stepBpm(40.5, -1)).toBe(40);
+  });
+});
+
+describe('載入設定與選取修正超出音域的起始音', () => {
+  it('舊設定 startTonic=55 搭配男中音 [45, 65] 與大三和弦分解時，loadSettings 自動修正為 45', () => {
+    const storage = createMemoryStorage({
+      [SETTINGS_STORAGE_KEY]: JSON.stringify({
+        patternId: 'major-arpeggio', // 0..12
+        rangeName: '男中音', // [45, 65]
+        startTonic: 55, // 55+12=67 > 65 超界
+      }),
+    });
+    const loaded = loadSettings(storage);
+    expect(loaded.rangeName).toBe('男中音');
+    expect(loaded.voice).toBe('male');
+    expect(loaded.startTonic).toBe(45);
+  });
+
+  it('音型跨度大於音域（完全放不下）時，維持原起始音以便介面顯示超出音域', () => {
+    const storage = createMemoryStorage({
+      [SETTINGS_STORAGE_KEY]: JSON.stringify({
+        patternId: 'ninth-scale', // 0..14
+        rangeName: '我的音域',
+        startTonic: 60,
+        myRange: {
+          low: 60,
+          high: 70, // 僅 10 半音
+          raw: [59, 71],
+          method: 'twoNotes',
+          voice: 'normal',
+          measuredAt: '2026-11-27T00:00:00Z',
+        },
+      }),
+    });
+    const loaded = loadSettings(storage);
+    expect(loaded.startTonic).toBe(60);
   });
 });

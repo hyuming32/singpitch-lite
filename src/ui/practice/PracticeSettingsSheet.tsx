@@ -6,6 +6,7 @@ import {
   type ErrorLogEntry,
 } from '../../state/errlog';
 import type { MicInputMode, PracticeSettings } from '../../state/settings';
+import { displayNoteName } from '../noteLabel';
 
 export interface PracticeDiagnosticsSnapshot {
   mic: MicDiagnostics;
@@ -286,7 +287,29 @@ export function PracticeSettingsSheet({
             <input type="checkbox" checked={false} disabled readOnly />
           </label>
 
-          {/* 1. 收音模式 */}
+          {/* 1. 簡譜模式 */}
+          <div className="setting-row">
+            <span className="setting-label">簡譜</span>
+            <div className="segmented-group">
+              {(
+                [
+                  { value: 'fixed', label: '固定調' },
+                  { value: 'movable', label: '首調' },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  className={`seg-btn ${settings.jianpuMode === opt.value ? 'is-active' : ''}`}
+                  onClick={() => onUpdateSettings({ jianpuMode: opt.value })}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 2. 收音模式 */}
           <div className="setting-row">
             <span className="setting-label">收音</span>
             <div className="segmented-group">
@@ -515,7 +538,7 @@ export function PracticeSettingsSheet({
                     diagSnap?.recentHz !== undefined &&
                     diagSnap?.recentMidi !== null &&
                     diagSnap?.recentMidi !== undefined
-                      ? `${diagSnap.recentHz.toFixed(1)} Hz / MIDI ${diagSnap.recentMidi.toFixed(2)}`
+                      ? `${diagSnap.recentHz.toFixed(1)} Hz / ${displayNoteName(diagSnap.recentMidi)}（MIDI ${diagSnap.recentMidi.toFixed(2)}）`
                       : '無'}
                   </dd>
 

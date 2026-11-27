@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { singingCurve } from '../../core/curve';
-import { buildExercise, type Exercise, type KeyBlock } from '../../core/exercise';
+import {
+  buildExercise,
+  infLoopSeekTarget,
+  type Exercise,
+  type KeyBlock,
+} from '../../core/exercise';
 import { type Key } from '../../core/key';
 import { centsBetween, hzToMidi, midiToHz } from '../../core/notes';
 import { BUILTIN_PATTERNS } from '../../core/patterns';
@@ -53,12 +58,14 @@ import {
   passWindow,
   rescaleTime,
   scoreLines,
+  scoreLinesPortrait,
   staffLeftPad,
   timeToX,
   tonicLabel,
   type ScoreLine,
 } from './layout';
 import {
+  PORTRAIT_DEFAULT_PIANO_HEIGHT,
   clampPianoHeight,
   defaultPianoHeight,
   miniPianoHeight,
@@ -71,6 +78,7 @@ import {
   readIosInstallHintDismissed,
 } from './iosInstallHint';
 import {
+  computePortraitLayout,
   computeViewportLayout,
   type PianoCollapsedPref,
 } from './viewportLayout';
@@ -207,7 +215,7 @@ export function PracticePage({
   // 視窗尺寸由 usePracticeViewport 追蹤（輸入期間暫停重算以避免 iOS 鍵盤彈出造成版面跳動）
 
   const {
-    rotated,
+    isPortrait,
     isTablet,
     device,
     layoutWidth,
@@ -215,15 +223,25 @@ export function PracticePage({
     rotationCtx,
   } = useMemo(() => resolvePracticeViewport(viewport), [viewport]);
 
-  const autoLayout = computeViewportLayout({
-    height: layoutHeight,
-    width: layoutWidth,
-    device,
-    collapsedPref: 'auto',
-    preferredPianoHeight: settings.pianoHeight,
-    safePaddingY: safePadding?.y,
-    safePaddingX: safePadding?.x,
-  });
+  const autoLayout = isPortrait
+    ? computePortraitLayout(
+        layoutWidth,
+        layoutHeight,
+        safePadding ? { x: safePadding.x, y: safePadding.y } : undefined,
+        {
+          collapsedPref: 'auto',
+          preferredPianoHeight: settings.pianoHeight,
+        },
+      )
+    : computeViewportLayout({
+        height: layoutHeight,
+        width: layoutWidth,
+        device,
+        collapsedPref: 'auto',
+        preferredPianoHeight: settings.pianoHeight,
+        safePaddingY: safePadding?.y,
+        safePaddingX: safePadding?.x,
+      });
 
   useEffect(() => {
     if (forceExpandPiano && !autoLayout.autoCollapsed) {
@@ -280,7 +298,7 @@ export function PracticePage({
     if (pageEl) ro.observe(pageEl);
     if (scoreEl) ro.observe(scoreEl);
     return () => ro.disconnect();
-  }, [rotated, layoutWidth, layoutHeight]);
+  }, [isPortrait, layoutWidth, layoutHeight]);
 
   const pattern = useMemo(
     () =>
@@ -402,7 +420,6 @@ export function PracticePage({
     try {
       const ex = buildExercise(pattern, {
         ...toExerciseOptions(settings),
-        repeats: repeatsPerKeyToCount(settings.repeatsPerKey),
         displayTranspose: pitchShift,
         ...(selectedTonicList && selectedTonicList.length > 0
           ? { tonicList: selectedTonicList }
@@ -420,6 +437,31 @@ export function PracticePage({
 
   // 訂閱播放位置與結束事件
   useEffect(() => {
+    const triggerInfLoop = (
+      anchorKb: KeyBlock,
+      now: number,
+      resumePlay: boolean,
+    ) => {
+      const loopTarget = infLoopSeekTarget(anchorKb);
+      infLoopRef.current.lastSeekAt = now;
+      rawSungRef.current = rawSungRef.current.filter(
+        (p) => p.t < anchorKb.start,
+      );
+      voiceGateRef.current.reset();
+      setSungVersion((v) => v + 1);
+      setInfLoopCount((c) => c + 1);
+      lastPosRef.current = {
+        sec: loopTarget,
+        time: now,
+        playing: true,
+      };
+      setSec(loopTarget);
+      engine.seek(loopTarget);
+      if (resumePlay) {
+        engine.play();
+      }
+    };
+
     const unsubPos = engine.onPosition((s, isPlaying) => {
       if (suppressLoadPosRef.current && s === 0 && !isPlaying) {
         suppressLoadPosRef.current = false;
@@ -438,20 +480,7 @@ export function PracticePage({
           if (anchorKb && s >= anchorKb.end - 0.015) {
             const now = performance.now();
             if (now - infLoopRef.current.lastSeekAt > 150) {
-              infLoopRef.current.lastSeekAt = now;
-              rawSungRef.current = rawSungRef.current.filter(
-                (p) => p.t < anchorKb.start,
-              );
-              voiceGateRef.current.reset();
-              setSungVersion((v) => v + 1);
-              setInfLoopCount((c) => c + 1);
-              lastPosRef.current = {
-                sec: anchorKb.start,
-                time: now,
-                playing: true,
-              };
-              setSec(anchorKb.start);
-              engine.seek(anchorKb.start);
+              triggerInfLoop(anchorKb, now, false);
               return;
             }
           }
@@ -479,22 +508,7 @@ export function PracticePage({
         );
         const anchorKb = ex.keys[anchorIdx];
         if (anchorKb) {
-          const now = performance.now();
-          infLoopRef.current.lastSeekAt = now;
-          rawSungRef.current = rawSungRef.current.filter(
-            (p) => p.t < anchorKb.start,
-          );
-          voiceGateRef.current.reset();
-          setSungVersion((v) => v + 1);
-          setInfLoopCount((c) => c + 1);
-          lastPosRef.current = {
-            sec: anchorKb.start,
-            time: now,
-            playing: true,
-          };
-          setSec(anchorKb.start);
-          engine.seek(anchorKb.start);
-          engine.play();
+          triggerInfLoop(anchorKb, performance.now(), true);
           return;
         }
       }
@@ -1153,19 +1167,36 @@ export function PracticePage({
     : settings.pianoCollapsed
       ? 'collapsed'
       : 'auto';
-  const vpLayout = computeViewportLayout({
-    height: layoutHeight,
-    width: layoutWidth,
-    device,
-    collapsedPref,
-    preferredPianoHeight: settings.pianoHeight,
-    overridePianoHeight: dragHeight,
-    safePaddingY: safePadding?.y,
-    safePaddingX: safePadding?.x,
-  });
+  const portraitLayout = isPortrait
+    ? computePortraitLayout(
+        layoutWidth,
+        layoutHeight,
+        safePadding ? { x: safePadding.x, y: safePadding.y } : undefined,
+        {
+          collapsedPref,
+          preferredPianoHeight: settings.pianoHeight,
+          overridePianoHeight: dragHeight,
+        },
+      )
+    : null;
+  const vpLayout =
+    portraitLayout ??
+    computeViewportLayout({
+      height: layoutHeight,
+      width: layoutWidth,
+      device,
+      collapsedPref,
+      preferredPianoHeight: settings.pianoHeight,
+      overridePianoHeight: dragHeight,
+      safePaddingY: safePadding?.y,
+      safePaddingX: safePadding?.x,
+    });
 
   const handleH = vpLayout.handleHeight;
   const miniH = miniPianoHeight(isTablet);
+  const baseDefaultPianoH = isPortrait
+    ? PORTRAIT_DEFAULT_PIANO_HEIGHT
+    : defaultPianoHeight(isTablet);
   const maxPianoH = vpLayout.maxPianoHeight;
   const isPianoCollapsed = vpLayout.collapsed;
   const effectivePianoH = vpLayout.pianoHeight;
@@ -1174,6 +1205,36 @@ export function PracticePage({
 
   const lines = useMemo(() => {
     if (!exercise) return [];
+    if (isPortrait) {
+      const baseLines = scoreLinesPortrait(
+        exercise,
+        sec,
+        maxLines as 1 | 2 | 3,
+      );
+      if (settings.repeatsPerKey !== 'inf' || maxLines < 3) {
+        return baseLines;
+      }
+      const passLines = baseLines.filter((l) => !l.isPreview);
+      const currLine = passLines.find((l) => l.isCurrent) ?? passLines[0];
+      if (!currLine || currLine.phase !== 'sing' || passLines.length > 2) {
+        return baseLines;
+      }
+      const firstLine = passLines[0]!;
+      const previewLine: ScoreLine = {
+        keyIndex: firstLine.keyIndex,
+        pass: firstLine.pass,
+        phase: firstLine.phase,
+        noteRange: firstLine.noteRange,
+        start: firstLine.start,
+        end: firstLine.end,
+        isCurrent: false,
+        label: null,
+        isSamePassContinuation: false,
+        isPreview: true,
+      };
+      return [...passLines, previewLine];
+    }
+
     const baseLines = scoreLines(exercise, sec, maxLines);
     if (
       settings.repeatsPerKey !== 'inf' ||
@@ -1219,7 +1280,7 @@ export function PracticePage({
       return [curr, previewLine];
     }
     return currIdx === 0 ? [curr, previewLine] : [previewLine, curr];
-  }, [exercise, sec, maxLines, settings.repeatsPerKey]);
+  }, [exercise, sec, maxLines, settings.repeatsPerKey, isPortrait]);
 
   const sungByLine = useMemo(() => {
     const raw = rawSungRef.current;
@@ -1320,18 +1381,25 @@ export function PracticePage({
     const activeNoteX =
       line.isCurrent && activeNoteIdx >= 0 ? glyphs[activeNoteIdx]!.x : null;
 
+    const isPreviewLine = line.isPreview ?? !line.isCurrent;
     const keyText = tonicLabel(lineKey);
     let lineLabel: string | null = null;
-    if (line.isCurrent) {
-      if (line.phase === 'listen') {
-        lineLabel = `${keyText} 示範`;
-      } else if (settings.repeatsPerKey === 'inf') {
-        lineLabel = `${keyText} 第 ${infLoopCount} 遍`;
+    if (!isPreviewLine) {
+      if (!line.isSamePassContinuation) {
+        if (line.phase === 'listen') {
+          lineLabel = `${keyText} 示範`;
+        } else if (settings.repeatsPerKey === 'inf') {
+          lineLabel = `${keyText} 第 ${infLoopCount} 遍`;
+        } else {
+          lineLabel = `${keyText} 第 ${line.pass + 1}/${settings.repeatsPerKey} 遍`;
+        }
       } else {
-        lineLabel = `${keyText} 第 ${line.pass + 1}/${settings.repeatsPerKey} 遍`;
+        lineLabel = isPortrait
+          ? null
+          : settings.jianpuMode === 'fixed'
+            ? '固定調'
+            : `1=${keyText}`;
       }
-    } else if (line.isSamePassContinuation) {
-      lineLabel = settings.jianpuMode === 'fixed' ? '固定調' : `1=${keyText}`;
     } else if (currentLineInfo && line.keyIndex === currentLineInfo.keyIndex) {
       if (line.phase === 'listen') {
         lineLabel = `${keyText} 示範`;
@@ -1346,6 +1414,7 @@ export function PracticePage({
 
     return {
       line,
+      isPreviewLine,
       lineKey,
       lineTonicMidi,
       metrics,
@@ -1369,7 +1438,7 @@ export function PracticePage({
     }
     const pt = toLocalPoint(e.clientX, e.clientY, rotationCtx);
     const expandedFallback = clampPianoHeight(
-      settings.pianoHeight ?? defaultPianoHeight(isTablet),
+      settings.pianoHeight ?? baseDefaultPianoH,
       maxPianoH,
     );
     handleDragRef.current = {
@@ -1416,7 +1485,7 @@ export function PracticePage({
       deltaY: dy,
       distance: drag.maxDist,
       miniHeight: miniH,
-      defaultHeight: defaultPianoHeight(isTablet),
+      defaultHeight: baseDefaultPianoH,
       maxHeight: maxPianoH,
     });
     if (!result.collapsed && autoLayout.autoCollapsed) {
@@ -1452,10 +1521,22 @@ export function PracticePage({
         ? win.pass + 1
         : 1;
 
+  const onlySelectedButton = (
+    <button
+      type="button"
+      className={`practice-only-selected-btn ${keySelection.onlySelected ? 'is-on' : ''}`}
+      disabled={selectedCount === 0}
+      aria-pressed={keySelection.onlySelected}
+      onClick={handleToggleOnlySelected}
+    >
+      只練選的 {selectedCount}
+    </button>
+  );
+
   return (
     <div
       ref={pageRef}
-      className={`practice-page ${isTablet ? 'is-tablet' : 'is-phone'} ${rotated ? 'is-rotated' : ''}`}
+      className={`practice-page ${isTablet ? 'is-tablet' : isPortrait ? 'is-portrait' : 'is-phone'}`}
       style={{
         width: `${vpLayout.viewportWidth}px`,
         height: `${vpLayout.viewportHeight}px`,
@@ -1475,15 +1556,7 @@ export function PracticePage({
           ‹
         </button>
 
-        <button
-          type="button"
-          className={`practice-only-selected-btn ${keySelection.onlySelected ? 'is-on' : ''}`}
-          disabled={selectedCount === 0}
-          aria-pressed={keySelection.onlySelected}
-          onClick={handleToggleOnlySelected}
-        >
-          只練選的 {selectedCount}
-        </button>
+        {!isPortrait && onlySelectedButton}
 
         <KeyStrip
           keys={fullKeys}
@@ -1492,6 +1565,10 @@ export function PracticePage({
           onlySelected={keySelection.onlySelected}
           selectedIndices={keySelection.selectedIndices}
           isTablet={isTablet}
+          isPortrait={isPortrait}
+          leadingSlot={
+            isPortrait && selectedCount > 0 ? onlySelectedButton : undefined
+          }
           rotationCtx={rotationCtx}
           onToggleKey={handleToggleKey}
           onJumpToKey={handleJumpToFullKey}
@@ -1499,21 +1576,23 @@ export function PracticePage({
         />
 
         <div className="practice-header-right">
+          {!isPortrait && (
+            <button
+              type="button"
+              className="practice-pill-btn"
+              onClick={() =>
+                onUpdateSettings({
+                  jianpuMode:
+                    settings.jianpuMode === 'fixed' ? 'movable' : 'fixed',
+                })
+              }
+            >
+              簡譜 {settings.jianpuMode === 'fixed' ? '固定調' : '首調'} ▾
+            </button>
+          )}
           <button
             type="button"
-            className="practice-pill-btn"
-            onClick={() =>
-              onUpdateSettings({
-                jianpuMode:
-                  settings.jianpuMode === 'fixed' ? 'movable' : 'fixed',
-              })
-            }
-          >
-            簡譜 {settings.jianpuMode === 'fixed' ? '固定調' : '首調'} ▾
-          </button>
-          <button
-            type="button"
-            className={`practice-pill-btn practice-mic-btn ${micActive ? 'is-on' : ''}`}
+            className={`practice-pill-btn practice-mic-btn ${isPortrait ? 'is-compact' : ''} ${micActive ? 'is-on' : ''}`}
             aria-label={micActive ? '關閉麥克風' : '開啟麥克風'}
             aria-pressed={micActive}
             onClick={handleToggleMic}
@@ -1534,7 +1613,7 @@ export function PracticePage({
               <path d="M5 10a7 7 0 0 0 14 0" />
               <line x1="12" y1="17" x2="12" y2="22" />
             </svg>
-            <span>麥克風</span>
+            {!isPortrait && <span>麥克風</span>}
             <span className="mic-toggle-dot" aria-hidden="true" />
           </button>
           <button
@@ -1635,8 +1714,8 @@ export function PracticePage({
               <div
                 key={`score-line-${lineIdx}`}
                 className={`score-line ${
-                  item.line.isCurrent ? 'is-current' : 'is-preview'
-                }`}
+                  item.line.isCurrent ? 'is-current' : ''
+                } ${item.isPreviewLine ? 'is-preview' : ''}`}
                 style={{ height: `${vpLayout.lineHeight}px` }}
               >
                 {/* 目前音淡藍色直條（僅出現在正在唱的那一行） */}
@@ -1665,9 +1744,14 @@ export function PracticePage({
                   tonicMidi={item.lineTonicMidi}
                   jianpuMode={settings.jianpuMode}
                   isTablet={isTablet}
-                  previewLabel={item.line.isCurrent ? null : item.lineLabel}
+                  isPortrait={isPortrait}
+                  previewLabel={item.isPreviewLine ? item.lineLabel : null}
                   lineLabel={item.lineLabel}
-                  octaveTag={item.line.isCurrent ? octaveTag : null}
+                  octaveTag={
+                    !item.isPreviewLine && !item.line.isSamePassContinuation
+                      ? octaveTag
+                      : null
+                  }
                   height={vpLayout.jianpuHeight}
                 />
 
@@ -1720,6 +1804,7 @@ export function PracticePage({
           height={effectivePianoH}
           collapsed={isPianoCollapsed}
           isTablet={isTablet}
+          isPortrait={isPortrait}
           rotationCtx={rotationCtx}
           engine={engine}
           onAudioError={setErrorMsg}
@@ -1745,6 +1830,8 @@ export function PracticePage({
         boundaryToast={boundaryToast}
         pianoDuringSing={settings.pianoDuringSing}
         isTablet={isTablet}
+        isPortrait={isPortrait}
+        titleHeight={portraitLayout?.patternTitleHeight}
         height={vpLayout.transportHeight}
         getSec={getExtrapolatedSec}
         onPrevKey={handlePrevKey}

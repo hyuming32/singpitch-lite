@@ -21,9 +21,9 @@ export const NOTE_NAMES = [
 export const RANGES: Record<string, readonly [number, number]> = {
   '完整 C2–C6': [36, 84],
   男低音: [40, 64],
-  男中音: [44, 68],
+  男中音: [45, 65],
   男高音: [48, 72],
-  女低音: [52, 76],
+  女低音: [53, 77],
   女中音: [57, 81],
   女高音: [60, 84],
 };

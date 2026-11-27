@@ -2,14 +2,18 @@ import { RANGES } from '../core/notes';
 import type { PatternDef } from '../core/patterns';
 import {
   MIN_MY_RANGE_SEMITONES,
+  MY_RANGE_NAME,
   findLowestFeasibleTonic,
   getPatternSpan,
+  getRangeBounds,
   type MyRangeData,
+  type PracticeSettings,
   type VoiceOption,
 } from './settings';
 
 export interface VocalRangePartMeta {
   name: string;
+  englishName: string;
   group: VoiceOption;
   color: string;
   darkText: boolean;
@@ -17,12 +21,12 @@ export interface VocalRangePartMeta {
 
 /** 音域圖顯示的六個標準聲部（男低音至女高音） */
 export const VOCAL_RANGE_PARTS: readonly VocalRangePartMeta[] = [
-  { name: '男低音', group: 'male', color: '#5b7186', darkText: false },
-  { name: '男中音', group: 'male', color: '#8aa1b5', darkText: true },
-  { name: '男高音', group: 'male', color: '#6b7787', darkText: false },
-  { name: '女低音', group: 'normal', color: '#a5553d', darkText: false },
-  { name: '女中音', group: 'normal', color: '#c9b37a', darkText: true },
-  { name: '女高音', group: 'normal', color: '#a8892f', darkText: true },
+  { name: '男低音', englishName: 'BASS', group: 'male', color: '#5b7186', darkText: false },
+  { name: '男中音', englishName: 'BARITONE', group: 'male', color: '#8aa1b5', darkText: true },
+  { name: '男高音', englishName: 'TENOR', group: 'male', color: '#6b7787', darkText: false },
+  { name: '女低音', englishName: 'CONTRALTO', group: 'normal', color: '#a5553d', darkText: false },
+  { name: '女中音', englishName: 'MEZZO SOPRANO', group: 'normal', color: '#c9b37a', darkText: true },
+  { name: '女高音', englishName: 'SOPRANO', group: 'normal', color: '#a8892f', darkText: true },
 ];
 
 export interface RecommendedVoiceResult {
@@ -210,4 +214,37 @@ export function resolveStartTonicForRange(
     return currentStartTonic;
   }
   return findLowestFeasibleTonic(pattern, low, high) ?? currentStartTonic;
+}
+
+const MALE_PART_SET = new Set<string>(['男低音', '男中音', '男高音']);
+const FEMALE_PART_SET = new Set<string>(['女低音', '女中音', '女高音']);
+
+/** 選擇音域時產生需更新的設定欄位（含對應聲部與起始音自動調整） */
+export function selectVocalRangePatch(
+  settings: Pick<PracticeSettings, 'startTonic' | 'myRange'>,
+  newRangeName: string,
+  pattern: Pick<PatternDef, 'jianpu'>,
+): Partial<PracticeSettings> {
+  const [newLow, newHigh] = getRangeBounds(newRangeName, settings.myRange);
+  const nextStart = resolveStartTonicForRange(
+    pattern,
+    settings.startTonic,
+    newLow,
+    newHigh,
+  );
+
+  let nextVoice: VoiceOption | undefined;
+  if (MALE_PART_SET.has(newRangeName)) {
+    nextVoice = 'male';
+  } else if (FEMALE_PART_SET.has(newRangeName)) {
+    nextVoice = 'normal';
+  } else if (newRangeName === MY_RANGE_NAME && settings.myRange) {
+    nextVoice = settings.myRange.voice;
+  }
+
+  return {
+    rangeName: newRangeName,
+    ...(nextVoice !== undefined ? { voice: nextVoice } : {}),
+    ...(nextStart !== settings.startTonic ? { startTonic: nextStart } : {}),
+  };
 }

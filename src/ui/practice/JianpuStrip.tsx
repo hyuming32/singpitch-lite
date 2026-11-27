@@ -14,6 +14,7 @@ interface JianpuStripProps {
   tonicMidi: number;
   jianpuMode: JianpuMode;
   isTablet: boolean;
+  isPortrait?: boolean;
   /** 預讀行顯示的自訂標記（例：「下一調 E♭」、「第 2 遍」） */
   previewLabel?: string | null;
   /** 左上角覆寫標籤（例：「D 第 2/2 遍」、「D 第 2 遍」、「下一個 E♭」） */
@@ -32,6 +33,7 @@ export function JianpuStrip({
   tonicMidi,
   jianpuMode,
   isTablet,
+  isPortrait = false,
   previewLabel,
   lineLabel,
   octaveTag,
@@ -46,7 +48,7 @@ export function JianpuStrip({
 
   return (
     <div
-      className={`jianpu-strip ${isTablet ? 'is-tablet' : ''}`}
+      className={`jianpu-strip ${isTablet ? 'is-tablet' : isPortrait ? 'is-portrait' : ''}`}
       style={height !== undefined ? { height: `${height}px` } : undefined}
     >
       {((modeLabel !== null && modeLabel !== '') || octaveTag) && (

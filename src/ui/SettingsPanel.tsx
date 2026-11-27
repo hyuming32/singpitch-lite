@@ -5,7 +5,6 @@ import type { PatternDef } from '../core/patterns';
 import {
   BPM_MAX,
   BPM_MIN,
-  MY_RANGE_NAME,
   clampBpm,
   findLowestFeasibleTonic,
   formatBpm,
@@ -19,13 +18,9 @@ import {
   type PracticeModeOption,
   type PracticeSettings,
   type TransposeOption,
-  type VoiceOption,
 } from '../state/settings';
-import { resolveStartTonicForRange } from '../state/vocalRange';
 import { useAudioEngine } from './AudioContext';
 import { JianpuLine } from './JianpuLine';
-import { RangeChart } from './RangeChart';
-import { VoiceClefControls } from './VoiceClefControls';
 import { buildJianpuTokens } from './miniStaffData';
 import { useBpmEdit } from './useBpmEdit';
 import { useHoldRepeat } from './useHoldRepeat';
@@ -35,7 +30,7 @@ interface SettingsPanelProps {
   settings: PracticeSettings;
   onUpdate: (patch: Partial<PracticeSettings>) => void;
   onStartPractice: () => void;
-  onOpenRangeTest: () => void;
+  onOpenRangeTest?: () => void;
   /** 手機版在全螢幕設定抽屜內可隱藏底部開始按鈕 */
   hideStartButton?: boolean;
 }
@@ -45,8 +40,6 @@ const NOTE_BEATS_OPTIONS: { value: NoteBeatsOption; label: string }[] = [
   { value: 1, label: '1' },
   { value: 2, label: '2' },
 ];
-
-const REPEATS_OPTIONS = [1, 2, 3, 4] as const;
 
 const ARTICULATION_OPTIONS: { value: ArticulationOption; label: string }[] = [
   { value: 'legato', label: '連音' },
@@ -70,7 +63,6 @@ export function SettingsPanel({
   settings,
   onUpdate,
   onStartPractice,
-  onOpenRangeTest,
   hideStartButton = false,
 }: SettingsPanelProps) {
   const engine = useAudioEngine();
@@ -148,39 +140,6 @@ export function SettingsPanel({
       engine.stop();
     };
   }, [engine]);
-
-  function handleRangeChange(newRangeName: string) {
-    const [newLow, newHigh] = getRangeBounds(newRangeName, settings.myRange);
-    const nextStart = resolveStartTonicForRange(
-      pattern,
-      settings.startTonic,
-      newLow,
-      newHigh,
-    );
-
-    let nextVoice: VoiceOption | undefined;
-    if (
-      newRangeName === '男低音' ||
-      newRangeName === '男中音' ||
-      newRangeName === '男高音'
-    ) {
-      nextVoice = 'male';
-    } else if (
-      newRangeName === '女低音' ||
-      newRangeName === '女中音' ||
-      newRangeName === '女高音'
-    ) {
-      nextVoice = 'normal';
-    } else if (newRangeName === MY_RANGE_NAME && settings.myRange) {
-      nextVoice = settings.myRange.voice;
-    }
-
-    onUpdate({
-      rangeName: newRangeName,
-      ...(nextVoice !== undefined ? { voice: nextVoice } : {}),
-      ...(nextStart !== settings.startTonic ? { startTonic: nextStart } : {}),
-    });
-  }
 
   function handleAutoAdjustTonic() {
     if (lowestFeasible !== null) {
@@ -291,23 +250,6 @@ export function SettingsPanel({
           </div>
         </div>
 
-        {/* 音域圖與試唱測音域 */}
-        <div className="setting-row setting-row-stack">
-          <RangeChart
-            selectedRangeName={settings.rangeName}
-            myRange={settings.myRange}
-            onSelectRange={handleRangeChange}
-            showFullRangeOption
-          />
-          <button
-            type="button"
-            className="range-test-open-btn"
-            onClick={onOpenRangeTest}
-          >
-            🎤 試唱測音域
-          </button>
-        </div>
-
         {/* 速度 */}
         <div className="setting-row">
           <span className="setting-label">速度</span>
@@ -375,23 +317,6 @@ export function SettingsPanel({
                 onClick={() => onUpdate({ noteBeats: opt.value })}
               >
                 {opt.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* 重複 */}
-        <div className="setting-row">
-          <span className="setting-label">重複</span>
-          <div className="segmented-group">
-            {REPEATS_OPTIONS.map((n) => (
-              <button
-                key={n}
-                type="button"
-                className={`seg-btn ${settings.repeats === n ? 'is-active' : ''}`}
-                onClick={() => onUpdate({ repeats: n })}
-              >
-                {n} 次
               </button>
             ))}
           </div>
@@ -499,15 +424,8 @@ export function SettingsPanel({
         </div>
       </div>
 
-      {/* 固定於欄底的聲部／譜號、摘要、試聽與開始練唱 */}
+      {/* 固定於欄底的摘要、試聽與開始練唱 */}
       <div className="settings-footer">
-        {!hideStartButton && (
-          <VoiceClefControls
-            settings={settings}
-            pattern={pattern}
-            onUpdate={onUpdate}
-          />
-        )}
         <div className="settings-summary-box">
           {displayError ? (
             <div className="settings-error-box">

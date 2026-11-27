@@ -28,8 +28,10 @@ export interface ScoreLine {
   isCurrent: boolean;
   /** 預讀行首小字（例如「下一調 E♭」、「第 2 遍」）；目前行或無需標示時為 null */
   label: string | null;
-  /** 是否為同一遍的後半段（長圖案拆兩行） */
+  /** 是否為同一遍的後半段（長圖案拆兩行或三行） */
   isSamePassContinuation: boolean;
+  /** 是否為淡色預覽行（若未指定，依 !isCurrent 決定） */
+  isPreview?: boolean;
 }
 
 export interface NoteGlyph {
@@ -552,6 +554,174 @@ export function scoreLines(
     return [currLine, nextLine];
   }
   return [nextLine, currLine];
+}
+
+/**
+ * 直放三行樂譜的單遍音符拆分規則：
+ * - ≤ 16 個音（每行最多 8 個音）：平均分成兩行（例 7 → [4, 3]、15 → [8, 7]、1 → [1]）
+ * - > 16 個音：平均分成三行（例 20 → [7, 7, 6]），三行皆顯示目前這一遍
+ */
+export function splitNotesIntoPortraitLines(noteCount: number): number[] {
+  if (!Number.isFinite(noteCount) || noteCount <= 0) {
+    return [];
+  }
+  const n = Math.floor(noteCount);
+  if (n === 1) {
+    return [1];
+  }
+  if (n <= 16) {
+    const first = Math.ceil(n / 2);
+    return [first, n - first];
+  }
+  const base = Math.floor(n / 3);
+  const rem = n % 3;
+  return [
+    base + (rem > 0 ? 1 : 0),
+    base + (rem > 1 ? 1 : 0),
+    base,
+  ];
+}
+
+function buildSegmentsForPass(
+  ex: Exercise,
+  w: PassWindow,
+): InternalSegment[] {
+  const winNotes = ex.notes.filter(
+    (n) =>
+      n.keyIndex === w.keyIndex && n.pass === w.pass && n.phase === w.phase,
+  );
+  const counts = splitNotesIntoPortraitLines(winNotes.length);
+  if (counts.length === 0) {
+    return [
+      {
+        keyIndex: w.keyIndex,
+        pass: w.pass,
+        phase: w.phase,
+        noteRange: [0, 0],
+        start: w.start,
+        end: w.end,
+        isSamePassContinuation: false,
+      },
+    ];
+  }
+
+  const segs: InternalSegment[] = [];
+  let offset = 0;
+  for (let i = 0; i < counts.length; i++) {
+    const count = counts[i]!;
+    const startOffset = offset;
+    const endOffset = offset + count;
+    const prevEnd = i === 0 ? w.start : segs[i - 1]!.end;
+    let endTime: number;
+    if (i === counts.length - 1) {
+      endTime = Math.max(w.end, prevEnd + 0.01);
+    } else {
+      const nextNote = winNotes[endOffset];
+      endTime = Math.max(prevEnd + 0.005, nextNote ? nextNote.start : prevEnd + 0.01);
+    }
+    segs.push({
+      keyIndex: w.keyIndex,
+      pass: w.pass,
+      phase: w.phase,
+      noteRange: [startOffset, endOffset],
+      start: prevEnd,
+      end: endTime,
+      isSamePassContinuation: i > 0,
+    });
+    offset = endOffset;
+  }
+  return segs;
+}
+
+/**
+ * 規劃手機直放模式的三行樂譜：
+ * - 目前這一遍拆成兩行（≤16 音）或三行（>16 音）
+ * - 若目前這一遍為兩行（或一行），第三行為下一遍／下一個調預覽（淡色）
+ */
+export function scoreLinesPortrait(
+  ex: Exercise,
+  sec: number,
+  maxLines: 1 | 2 | 3 = 3,
+): ScoreLine[] {
+  const windows = listPassWindows(ex);
+  if (windows.length === 0) {
+    return [];
+  }
+
+  const activeWinIdx = (() => {
+    const activeWin = passWindow(ex, sec);
+    if (!activeWin) return 0;
+    const idx = windows.findIndex(
+      (w) =>
+        w.keyIndex === activeWin.keyIndex &&
+        w.pass === activeWin.pass &&
+        w.phase === activeWin.phase,
+    );
+    return idx >= 0 ? idx : 0;
+  })();
+
+  const activeWin = windows[activeWinIdx]!;
+  const currSegs = buildSegmentsForPass(ex, activeWin);
+
+  if (maxLines <= 1) {
+    const seg =
+      currSegs.find((s) => sec >= s.start && sec < s.end) ?? currSegs[0]!;
+    return [
+      {
+        ...seg,
+        isCurrent: true,
+        label: null,
+        isPreview: false,
+      },
+    ];
+  }
+
+  let activeSegInPass = currSegs.findIndex(
+    (s) => sec >= s.start && sec < s.end,
+  );
+  if (activeSegInPass === -1) {
+    activeSegInPass =
+      sec >= currSegs[currSegs.length - 1]!.end ? currSegs.length - 1 : 0;
+  }
+
+  // 若目前這遍已拆成 3 行（> 16 音），三行皆顯示目前這遍
+  if (currSegs.length >= 3) {
+    const lines = currSegs.map((seg, idx) => ({
+      ...seg,
+      isCurrent: idx === activeSegInPass,
+      label: null,
+      isPreview: false,
+    }));
+    if (maxLines === 2) {
+      const pairStart = Math.min(activeSegInPass, lines.length - 2);
+      return lines.slice(pairStart, pairStart + 2);
+    }
+    return lines.slice(0, maxLines);
+  }
+
+  const result: ScoreLine[] = currSegs.map((seg, idx) => ({
+    ...seg,
+    isCurrent: idx === activeSegInPass,
+    label: null,
+    isPreview: false,
+  }));
+
+  if (result.length < maxLines) {
+    const nextWin = windows[activeWinIdx + 1] ?? null;
+    if (nextWin) {
+      const nextSegs = buildSegmentsForPass(ex, nextWin);
+      const nextSeg0 = nextSegs[0]!;
+      result.push({
+        ...nextSeg0,
+        isCurrent: false,
+        isSamePassContinuation: false,
+        label: buildPreviewLabel(ex, currSegs[0]!, nextSeg0),
+        isPreview: true,
+      });
+    }
+  }
+
+  return result;
 }
 
 /** 依新舊 BPM 等比換算播放秒數（以拍為單位維持相同位置） */

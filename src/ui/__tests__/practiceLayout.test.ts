@@ -15,6 +15,8 @@ import {
   pianoNeedlePercent,
   rescaleTime,
   scoreLines,
+  scoreLinesPortrait,
+  splitNotesIntoPortraitLines,
   staffLeftPad,
 } from '../practice/layout';
 import { metronomeAngle, weightY } from '../practice/MetronomeIcon';
@@ -299,5 +301,89 @@ describe('computePatternTitleFontSize 播放列音型名稱字級', () => {
     const tightRes = computePatternTitleLayout(50, '完整大調上下行', 30);
     expect(tightRes.fontSize).toBeCloseTo(21 * 0.45, 5);
     expect(tightRes.ellipsis).toBe(true);
+  });
+});
+
+describe('splitNotesIntoPortraitLines 與 scoreLinesPortrait 直放三行樂譜', () => {
+  const majorArpeggio = BUILTIN_PATTERNS.find((p) => p.id === 'major-arpeggio')!; // 7 音
+  const chromatic = BUILTIN_PATTERNS.find((p) => p.id === 'chromatic')!; // 25 音
+
+  it('行數拆分函式：7 → 4+3、15 → 8+7、20 → 三行皆目前遍', () => {
+    expect(splitNotesIntoPortraitLines(7)).toEqual([4, 3]);
+    expect(splitNotesIntoPortraitLines(15)).toEqual([8, 7]);
+    const split20 = splitNotesIntoPortraitLines(20);
+    expect(split20).toHaveLength(3);
+    expect(split20.reduce((a, b) => a + b, 0)).toBe(20);
+    for (const c of split20) {
+      expect(c).toBeLessThanOrEqual(8);
+    }
+  });
+
+  it('7 音圖案直放分三行：前兩行為目前遍 4+3，第三行為下一遍／下一調預覽且隨播放頭換行', () => {
+    const ex = buildExercise(majorArpeggio, {
+      startTonic: 62, // D4
+      low: 48,
+      high: 84,
+      bpm: 120,
+      noteBeats: 1,
+      repeats: 2,
+      transpose: 'up',
+      countInBeats: 0,
+      mode: 'follow',
+    });
+
+    // 第 1 遍前半（第 1 行）
+    const firstPart = scoreLinesPortrait(ex, 0.1, 3);
+    expect(firstPart).toHaveLength(3);
+    expect(firstPart[0]!.noteRange).toEqual([0, 4]);
+    expect(firstPart[0]!.isCurrent).toBe(true);
+    expect(firstPart[0]!.isPreview).toBe(false);
+    expect(firstPart[1]!.noteRange).toEqual([4, 7]);
+    expect(firstPart[1]!.isCurrent).toBe(false);
+    expect(firstPart[1]!.isPreview).toBe(false);
+    expect(firstPart[1]!.isSamePassContinuation).toBe(true);
+    expect(firstPart[2]!.isPreview).toBe(true);
+    expect(firstPart[2]!.label).toBe('第 2 遍');
+    expect(firstPart[2]!.noteRange).toEqual([0, 4]);
+
+    // 唱到後半（第 2 行）
+    const secondPart = scoreLinesPortrait(ex, firstPart[1]!.start + 0.05, 3);
+    expect(secondPart[0]!.isCurrent).toBe(false);
+    expect(secondPart[0]!.isPreview).toBe(false);
+    expect(secondPart[1]!.isCurrent).toBe(true);
+    expect(secondPart[1]!.isPreview).toBe(false);
+    expect(secondPart[2]!.isPreview).toBe(true);
+
+    // 進到第 2 遍（最後一遍），第 3 行預覽下一調 E♭
+    const pass2Start = firstPart[2]!.start + 0.05;
+    const pass2Lines = scoreLinesPortrait(ex, pass2Start, 3);
+    expect(pass2Lines).toHaveLength(3);
+    expect(pass2Lines[2]!.isPreview).toBe(true);
+    expect(pass2Lines[2]!.label).toBe('下一調 E♭');
+  });
+
+  it('超過 16 音（半音階 25 音）三行皆為目前這一遍（無淡色預覽行）', () => {
+    const ex = buildExercise(chromatic, {
+      startTonic: 60,
+      low: 48,
+      high: 84,
+      bpm: 120,
+      noteBeats: 1,
+      repeats: 1,
+      transpose: 'up',
+      countInBeats: 0,
+      mode: 'follow',
+    });
+
+    const lines = scoreLinesPortrait(ex, 0.1, 3);
+    expect(lines).toHaveLength(3);
+    expect(lines.every((l) => l.keyIndex === 0 && l.isPreview === false)).toBe(
+      true,
+    );
+    const totalNotesShown = lines.reduce(
+      (sum, l) => sum + (l.noteRange[1] - l.noteRange[0]),
+      0,
+    );
+    expect(totalNotesShown).toBe(25);
   });
 });

@@ -1,4 +1,4 @@
-import type { Exercise, ExerciseOptions } from '../core/exercise';
+import type { CadenceMode, Exercise, ExerciseOptions } from '../core/exercise';
 import type { JianpuMode } from '../core/jianpu';
 import { RANGES } from '../core/notes';
 import { clefForRange, type Clef } from '../core/staff';
@@ -82,7 +82,7 @@ export interface PracticeSettings {
   mode: PracticeModeOption;
   pianoDuringSing: boolean;
   pad: boolean;
-  cadence: boolean;
+  cadence: CadenceMode;
   countIn: boolean;
   metronome: boolean;
   jianpuMode: JianpuMode;
@@ -112,7 +112,7 @@ export const DEFAULT_SETTINGS: PracticeSettings = {
   mode: 'listen-then-sing',
   pianoDuringSing: true,
   pad: true,
-  cadence: true,
+  cadence: 'double',
   countIn: true,
   metronome: true,
   jianpuMode: 'fixed',
@@ -361,7 +361,14 @@ export function sanitizeSettings(raw: unknown): PracticeSettings {
     mode,
     pianoDuringSing: validateBoolean(obj.pianoDuringSing, DEFAULT_SETTINGS.pianoDuringSing),
     pad: validateBoolean(obj.pad, DEFAULT_SETTINGS.pad),
-    cadence: validateBoolean(obj.cadence, DEFAULT_SETTINGS.cadence),
+    cadence:
+      obj.cadence === 'off' || obj.cadence === 'double' || obj.cadence === 'single'
+        ? obj.cadence
+        : typeof obj.cadence === 'boolean'
+          ? obj.cadence
+            ? 'double'
+            : 'off'
+          : DEFAULT_SETTINGS.cadence,
     countIn: validateBoolean(obj.countIn, DEFAULT_SETTINGS.countIn),
     metronome: validateBoolean(obj.metronome, DEFAULT_SETTINGS.metronome),
     jianpuMode,

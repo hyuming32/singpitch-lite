@@ -394,6 +394,34 @@ export function SettingsPanel({
           </div>
         </div>
 
+        {/* 換調提示和弦 */}
+        <div className="setting-row">
+          <span className="setting-label">提示和弦</span>
+          <div className="segmented-group">
+            <button
+              type="button"
+              className={`seg-btn ${settings.cadence === 'off' ? 'is-active' : ''}`}
+              onClick={() => onUpdate({ cadence: 'off' })}
+            >
+              關閉
+            </button>
+            <button
+              type="button"
+              className={`seg-btn ${settings.cadence === 'double' ? 'is-active' : ''}`}
+              onClick={() => onUpdate({ cadence: 'double' })}
+            >
+              雙和弦
+            </button>
+            <button
+              type="button"
+              className={`seg-btn ${settings.cadence === 'single' ? 'is-active' : ''}`}
+              onClick={() => onUpdate({ cadence: 'single' })}
+            >
+              單和弦快切
+            </button>
+          </div>
+        </div>
+
         {/* 開關 */}
         <div className="toggle-list">
           <label className="toggle-item">
@@ -402,14 +430,6 @@ export function SettingsPanel({
               type="checkbox"
               checked={settings.pad}
               onChange={(e) => onUpdate({ pad: e.target.checked })}
-            />
-          </label>
-          <label className="toggle-item">
-            <span>換調前提示和弦</span>
-            <input
-              type="checkbox"
-              checked={settings.cadence}
-              onChange={(e) => onUpdate({ cadence: e.target.checked })}
             />
           </label>
           <label className="toggle-item">

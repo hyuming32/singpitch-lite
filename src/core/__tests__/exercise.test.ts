@@ -343,4 +343,29 @@ describe('exercise', () => {
       6,
     );
   });
+
+  it('supports single-chord fast cadence without extra rest beat', () => {
+    const ex = buildExercise(majorArp, {
+      startTonic: 60,
+      low: 48,
+      high: 79,
+      bpm: 120, // 1 拍 = 0.5 秒
+      mode: 'follow',
+      cadence: 'single',
+      repeats: 1,
+      countInBeats: 0,
+      transpose: 'up',
+    });
+
+    const cadences = ex.chords.filter((c) => c.role === 'cadence');
+    expect(cadences).toHaveLength(ex.keys.length);
+    for (const kb of ex.keys) {
+      const keyCadences = cadences.filter((c) => c.keyIndex === kb.index);
+      expect(keyCadences).toHaveLength(1);
+      expect(keyCadences[0]?.roman).toBe('I');
+      expect(keyCadences[0]?.dur).toBeCloseTo(0.5, 6);
+      // 1 拍後立刻開唱，沒有額外空拍
+      expect(kb.notesStart - kb.start).toBeCloseTo(0.5, 6);
+    }
+  });
 });

@@ -25,7 +25,8 @@ describe('SettingsPanel', () => {
     expect(html).not.toContain('3 次');
     expect(html).not.toContain('4 次');
     expect(html).toContain('每音拍數');
-    expect(html).toContain('換調前提示和弦');
+    expect(html).toContain('提示和弦');
+    expect(html).toContain('單和弦快切');
     expect(html).toContain('開始練唱');
   });
 });

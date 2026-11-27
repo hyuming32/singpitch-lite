@@ -2,6 +2,8 @@ import { chordName, chordPitchClasses, parseRoman } from './chords';
 import type { Key, KeyMode } from './key';
 import { parseJianpu, type PatternDef } from './patterns';
 
+export type CadenceMode = 'off' | 'double' | 'single';
+
 export interface ExerciseOptions {
   startTonic: number;
   low: number;
@@ -13,8 +15,8 @@ export interface ExerciseOptions {
   repeats?: number;
   articulation?: 'legato' | 'staccato';
   transpose?: 'fixed' | 'up' | 'up-down';
-  /** 換調前是否播放終止式提示和弦 */
-  cadence?: boolean;
+  /** 換調前提示和弦模式：'off' / false 關閉；'double' / true 為 I → V/7 雙和弦；'single' 為 1 拍 I 級單和弦快切（不斷拍） */
+  cadence?: boolean | CadenceMode;
   /** 預備拍數（只在最前面），預設 4 */
   countInBeats?: number;
   /** 每個調之間休息拍數，預設 1 */
@@ -178,7 +180,14 @@ export function buildExercise(
     };
     const keyStart = tCursor;
 
-    if (cadence) {
+    const cadenceMode: CadenceMode =
+      cadence === true
+        ? 'double'
+        : cadence === 'double' || cadence === 'single'
+          ? cadence
+          : 'off';
+
+    if (cadenceMode === 'double') {
       const cadenceSteps: ReadonlyArray<{ roman: string; beats: number }> =
         resolvedKeyMode === 'minor'
           ? [
@@ -203,6 +212,19 @@ export function buildExercise(
         tCursor += dur;
       }
       tCursor += beatSec; // 1 拍空（吸氣預備拍）
+    } else if (cadenceMode === 'single') {
+      // 1 拍極速不斷拍：只彈 1 拍新調一級和弦，下一拍直接開唱
+      const roman = resolvedKeyMode === 'minor' ? 'i' : 'I';
+      chords.push({
+        start: tCursor,
+        dur: beatSec,
+        roman,
+        name: chordName(roman, key),
+        pcs: chordPitchClasses(roman, key),
+        role: 'cadence',
+        keyIndex,
+      });
+      tCursor += beatSec;
     }
 
     const notesStart = tCursor;

@@ -93,7 +93,7 @@ describe('settings', () => {
     expect(sanitized.mode).toBe(DEFAULT_SETTINGS.mode);
     expect(sanitized.pianoDuringSing).toBe(DEFAULT_SETTINGS.pianoDuringSing);
     expect(sanitized.pad).toBe(DEFAULT_SETTINGS.pad);
-    expect(sanitized.cadence).toBe(false);
+    expect(sanitized.cadence).toBe('off');
     expect(sanitized.countIn).toBe(false);
     expect(sanitized.metronome).toBe(DEFAULT_SETTINGS.metronome);
     expect(sanitized.jianpuMode).toBe('movable');
@@ -116,7 +116,7 @@ describe('settings', () => {
       mode: 'follow',
       pianoDuringSing: false,
       pad: false,
-      cadence: false,
+      cadence: 'single',
       countIn: false,
       metronome: false,
       jianpuMode: 'movable',

@@ -344,7 +344,7 @@ describe('exercise', () => {
     );
   });
 
-  it('supports single-chord fast cadence without extra rest beat', () => {
+  it('supports single-chord fast cadence with bookend chord and no rest gap', () => {
     const ex = buildExercise(majorArp, {
       startTonic: 60,
       low: 48,
@@ -358,14 +358,22 @@ describe('exercise', () => {
     });
 
     const cadences = ex.chords.filter((c) => c.role === 'cadence');
-    expect(cadences).toHaveLength(ex.keys.length);
-    for (const kb of ex.keys) {
+    // 每個調前後各有 1 拍 I 級和弦（C → 唱段 → C → C# → 唱段 → C#）
+    expect(cadences).toHaveLength(ex.keys.length * 2);
+    for (let i = 0; i < ex.keys.length; i++) {
+      const kb = ex.keys[i]!;
       const keyCadences = cadences.filter((c) => c.keyIndex === kb.index);
-      expect(keyCadences).toHaveLength(1);
+      expect(keyCadences).toHaveLength(2);
       expect(keyCadences[0]?.roman).toBe('I');
+      expect(keyCadences[1]?.roman).toBe('I');
       expect(keyCadences[0]?.dur).toBeCloseTo(0.5, 6);
-      // 1 拍後立刻開唱，沒有額外空拍
+      expect(keyCadences[1]?.dur).toBeCloseTo(0.5, 6);
+      // 開頭 1 拍後立刻開唱
       expect(kb.notesStart - kb.start).toBeCloseTo(0.5, 6);
+      // 調與調之間無空白休息拍，收尾和弦結束即緊接下一調引導和弦
+      if (i > 0) {
+        expect(kb.start).toBeCloseTo(ex.keys[i - 1]!.end, 6);
+      }
     }
   });
 });

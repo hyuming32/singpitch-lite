@@ -281,6 +281,21 @@ export function buildExercise(
       emitPass(p, 'sing');
     }
 
+    if (cadenceMode === 'single') {
+      // 每個調結束時彈 1 拍當前調一級和弦收尾，緊接下一調開頭引導（不斷拍）
+      const roman = resolvedKeyMode === 'minor' ? 'i' : 'I';
+      chords.push({
+        start: tCursor,
+        dur: beatSec,
+        roman,
+        name: chordName(roman, key),
+        pcs: chordPitchClasses(roman, key),
+        role: 'cadence',
+        keyIndex,
+      });
+      tCursor += beatSec;
+    }
+
     keys.push({
       index: keyIndex,
       tonicMidi,
@@ -290,7 +305,11 @@ export function buildExercise(
       end: tCursor,
     });
 
-    if (keyIndex < tonicMidis.length - 1 && restBeats > 0) {
+    if (
+      cadenceMode !== 'single' &&
+      keyIndex < tonicMidis.length - 1 &&
+      restBeats > 0
+    ) {
       tCursor += restBeats * beatSec;
     }
   }

@@ -102,6 +102,12 @@ function voiceCadenceChord(
     while (prevBassMidi - bassMidi > 6) {
       bassMidi += 12;
     }
+    // 維持在舒適鋼琴中音區（E3–F#4），避免連續上行／下行超出範圍
+    if (bassMidi > 66) {
+      bassMidi -= 12;
+    } else if (bassMidi < 52) {
+      bassMidi += 12;
+    }
   }
 
   const midis: number[] = [bassMidi];
@@ -178,7 +184,6 @@ export function compileExercise(
   }
 
   // 和弦（pad 與 cadence）
-  let cadenceKeyIndex = -1;
   let prevCadenceBass: number | null = null;
   for (let ci = 0; ci < ex.chords.length; ci++) {
     const chord = ex.chords[ci]!;
@@ -193,10 +198,6 @@ export function compileExercise(
     if (isPad) {
       midis = voiceChord(chord.pcs);
     } else {
-      if (chord.keyIndex !== cadenceKeyIndex) {
-        cadenceKeyIndex = chord.keyIndex;
-        prevCadenceBass = null;
-      }
       midis = voiceCadenceChord(chord.pcs, prevCadenceBass);
       if (midis.length > 0) {
         prevCadenceBass = midis[0]!;

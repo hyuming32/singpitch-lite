@@ -147,7 +147,7 @@ describe('toExerciseOptions 與摘要', () => {
       repeatsPerKey: 2,
       articulation: 'staccato',
       transpose: 'up-down',
-      cadence: false,
+      cadence: 'off',
       countIn: false,
       mode: 'follow',
     };
@@ -162,7 +162,7 @@ describe('toExerciseOptions 與摘要', () => {
       repeats: 2,
       articulation: 'staccato',
       transpose: 'up-down',
-      cadence: false,
+      cadence: 'off',
       countInBeats: 0,
       mode: 'follow',
     });

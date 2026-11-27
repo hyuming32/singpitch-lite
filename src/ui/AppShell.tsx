@@ -91,7 +91,16 @@ export function AppShell() {
         <header className="desktop-topbar">
           <div className="topbar-left">
             <span className="brand-title">
-              SingPitch<span className="brand-accent">-Lite</span>
+              <img
+                src="./icon-192.png"
+                alt=""
+                className="brand-icon"
+                width={32}
+                height={32}
+              />
+              <span>
+                SingPitch<span className="brand-accent">-Lite</span>
+              </span>
             </span>
             <nav className="desktop-nav" aria-label="主要功能">
               <button

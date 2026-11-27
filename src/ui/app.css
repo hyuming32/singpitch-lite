@@ -96,10 +96,22 @@ button:disabled {
 }
 
 .brand-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
   font-size: 20px;
   font-weight: 700;
   letter-spacing: -0.02em;
   white-space: nowrap;
+}
+
+.brand-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  object-fit: cover;
+  flex-shrink: 0;
+  background-color: #ffffff;
 }
 
 .brand-accent {

@@ -1,0 +1,2509 @@
+:root {
+  --bg: #171b24;
+  --panel: #242b38;
+  --card: #1d2330;
+  --border: #374152;
+  --text: #edf0f7;
+  --text-muted: #a5afc1;
+  --blue: #4ca4ff;
+  --blue-bg: #24406a;
+  --blue-text: #a9cdfa;
+  --cyan: #42dfd0;
+  --orange: #ffb45b;
+  --danger: #ff6b78;
+  --danger-bg: #3b1c24;
+  --font-sans: 'Noto Sans TC', system-ui, -apple-system, sans-serif;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+select,
+input {
+  font-family: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  background: none;
+  box-shadow: none;
+  background-image: none;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* 外框：平板／桌面固定一屏，不整頁捲動 */
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  background-color: var(--bg);
+}
+
+/* 桌面／平板頂列 64px */
+.desktop-topbar {
+  height: 64px;
+  padding: 0 20px;
+  background-color: var(--panel);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-shrink: 0;
+}
+
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.brand-title {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+
+.brand-accent {
+  color: var(--blue);
+}
+
+.desktop-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.nav-tab {
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.nav-tab:hover {
+  color: var(--text);
+  background-color: var(--card);
+}
+
+.nav-tab.is-active {
+  background-color: var(--blue-bg);
+  color: var(--blue-text);
+  font-weight: 600;
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.mic-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.mic-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #64748b;
+}
+
+.gear-btn {
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background-color: var(--card);
+  color: var(--text);
+  font-size: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 手機頂列與底列（預設隱藏，小於 600px 顯示） */
+.mobile-topbar,
+.mobile-tabbar,
+.mobile-cat-pills,
+.mobile-bottom-bar {
+  display: none;
+}
+
+/* 主內容區 */
+.app-content {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 音階練習圖案選單：三欄格局（iPad 橫放 >= 900px） */
+.pattern-menu {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr) 330px;
+  height: 100%;
+  min-height: 0;
+}
+
+/* 左側分類欄 */
+.cat-sidebar {
+  background-color: var(--panel);
+  border-right: 1px solid var(--border);
+  padding: 14px 10px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 12px;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.cat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.cat-item {
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-align: left;
+}
+
+.cat-item:hover {
+  background-color: var(--card);
+  color: var(--text);
+}
+
+.cat-item.is-active {
+  background-color: var(--blue-bg);
+  color: var(--blue-text);
+  font-weight: 600;
+}
+
+.cat-item-count {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.custom-pattern-btn {
+  min-height: 44px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px dashed var(--border);
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.custom-pattern-btn:hover {
+  border-color: var(--blue);
+  color: var(--text);
+}
+
+.custom-notice-pill {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background-color: var(--blue-bg);
+  color: var(--blue-text);
+  font-size: 12px;
+  text-align: center;
+}
+
+/* 中間圖案卡片區 */
+.pattern-main {
+  padding: 18px 20px;
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.pattern-main-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.pattern-cat-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.pattern-cat-desc {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.pattern-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.pattern-empty-state {
+  padding: 40px 20px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+/* 圖案卡片 */
+.pattern-card {
+  background-color: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: left;
+  min-height: 44px;
+}
+
+.pattern-card:hover {
+  border-color: #52617a;
+}
+
+.pattern-card.is-selected {
+  border: 2px solid var(--blue);
+  padding: 11px;
+}
+
+/* 手機版頂部名稱列在桌面版隱藏 */
+.pattern-card-top {
+  display: none;
+}
+
+.pattern-card-jianpu {
+  color: var(--cyan);
+  font-size: 15px;
+  font-weight: 600;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+}
+
+.pattern-card-staff {
+  width: 100%;
+}
+
+.mini-staff-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.pattern-card-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pattern-card-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.pattern-card-chord {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--orange);
+  white-space: nowrap;
+}
+
+/* 簡譜高低音點排版 */
+.jianpu-line {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.1;
+}
+
+.jianpu-token-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.jianpu-note {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 0;
+}
+
+.jianpu-core {
+  display: inline-flex;
+  align-items: baseline;
+}
+
+.jianpu-acc {
+  font-size: 0.78em;
+  margin-right: 1px;
+}
+
+.jianpu-dots {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 8px;
+  line-height: 1;
+  letter-spacing: -1px;
+}
+
+.jianpu-dots-up {
+  top: -1px;
+}
+
+.jianpu-dots-down {
+  bottom: -1px;
+}
+
+.jianpu-dash,
+.jianpu-glide {
+  opacity: 0.85;
+}
+
+/* 右側設定欄 */
+.settings-sidebar {
+  background-color: var(--panel);
+  border-left: 1px solid var(--border);
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.settings-scroll-area {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.settings-footer {
+  flex-shrink: 0;
+  padding: 12px 16px 16px;
+  border-top: 1px solid var(--border);
+  background-color: var(--panel);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-selected-box {
+  background-color: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-selected-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.settings-selected-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.settings-selected-name {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.settings-selected-chord {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--orange);
+}
+
+.settings-selected-jianpu {
+  color: var(--cyan);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.settings-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 44px;
+}
+
+.setting-row-stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.setting-label {
+  font-size: 14px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.stepper {
+  display: inline-flex;
+  align-items: center;
+  background-color: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.stepper-btn {
+  min-width: 44px;
+  min-height: 44px;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.stepper-btn:hover:not(:disabled) {
+  background-color: var(--blue-bg);
+}
+
+.stepper-value {
+  min-width: 68px;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  padding: 0 6px;
+}
+
+.setting-select {
+  min-height: 44px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background-color: var(--card);
+  color: var(--text);
+  font-size: 14px;
+  max-width: 210px;
+}
+
+.segmented-group {
+  display: inline-flex;
+  background-color: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.setting-row-stack .segmented-group {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.seg-btn {
+  min-height: 40px;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.seg-btn.is-active {
+  background-color: var(--blue-bg);
+  color: var(--blue-text);
+  font-weight: 600;
+}
+
+.toggle-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.toggle-item {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.toggle-item input[type='checkbox'] {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--blue);
+  cursor: pointer;
+}
+
+.settings-summary-box {
+  background-color: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.settings-summary-text {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.settings-error-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-error-text {
+  margin: 0;
+  font-size: 13px;
+  color: var(--danger);
+  line-height: 1.4;
+}
+
+.auto-adjust-btn {
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--blue);
+  background-color: var(--blue-bg);
+  color: var(--blue-text);
+  font-size: 13px;
+  font-weight: 600;
+  align-self: flex-start;
+}
+
+.settings-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.preview-btn {
+  min-height: 44px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background-color: var(--card);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.preview-btn.is-playing {
+  border-color: var(--orange);
+  color: var(--orange);
+}
+
+.start-btn {
+  min-height: 48px;
+  border-radius: 10px;
+  background-color: var(--blue);
+  color: #0d1522;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+/* 即將推出頁面 */
+.coming-soon-page {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 32px;
+  color: var(--text-muted);
+}
+
+.coming-soon-page h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 22px;
+}
+
+.coming-soon-page p {
+  margin: 0;
+  font-size: 15px;
+}
+
+/* 練唱佔位頁 */
+.practice-stub {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background-color: var(--bg);
+}
+
+.portrait-hint-banner {
+  display: none;
+  background-color: var(--blue-bg);
+  color: var(--blue-text);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+  padding: 8px 12px;
+  padding-top: calc(8px + env(safe-area-inset-top));
+}
+
+.practice-topbar {
+  min-height: 60px;
+  padding: 8px 16px;
+  background-color: var(--panel);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.back-btn {
+  min-height: 44px;
+  min-width: 64px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background-color: var(--card);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.practice-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.practice-key-badge {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--blue-text);
+  background-color: var(--blue-bg);
+  padding: 6px 12px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+
+.practice-error {
+  margin: 12px 16px 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background-color: var(--danger-bg);
+  color: var(--danger);
+  font-size: 14px;
+}
+
+.practice-stage {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px;
+}
+
+.practice-jianpu-display {
+  font-size: 36px;
+  font-weight: 700;
+  color: var(--cyan);
+  text-align: center;
+}
+
+.practice-time-hint {
+  font-size: 14px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.practice-controls {
+  padding: 14px 16px calc(14px + env(safe-area-inset-bottom));
+  background-color: var(--panel);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+}
+
+.transport-btn {
+  min-width: 56px;
+  min-height: 48px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background-color: var(--card);
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.transport-btn-primary {
+  min-width: 72px;
+  background-color: var(--blue);
+  border-color: var(--blue);
+  color: #0d1522;
+}
+
+/* 彈窗與抽屜 */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(10, 14, 22, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 40;
+}
+
+.modal-card {
+  width: 100%;
+  max-width: 400px;
+  background-color: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.modal-placeholder-text {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.sheet-close-btn {
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 8px;
+  background-color: var(--blue-bg);
+  color: var(--blue-text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* 600–899px 平板直立／窄視窗：2 欄卡片，右欄 300px */
+@media (max-width: 899px) and (min-width: 600px) {
+  .pattern-menu {
+    grid-template-columns: 168px minmax(0, 1fr) 300px;
+  }
+
+  .pattern-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* < 600px iPhone 直立版面 */
+@media (max-width: 599px) {
+  .app-shell {
+    height: auto;
+    min-height: 100vh;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+
+  .app-content {
+    overflow: visible;
+  }
+
+  .desktop-topbar,
+  .cat-sidebar,
+  .settings-sidebar {
+    display: none;
+  }
+
+  .mobile-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: env(safe-area-inset-top) 16px 0;
+    height: calc(52px + env(safe-area-inset-top));
+    background-color: var(--panel);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .mobile-topbar-title {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 700;
+  }
+
+  .mobile-topbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .mobile-toast {
+    font-size: 12px;
+    background-color: var(--blue-bg);
+    color: var(--blue-text);
+    padding: 4px 8px;
+    border-radius: 6px;
+  }
+
+  .mobile-add-btn {
+    min-width: 44px;
+    min-height: 44px;
+    border-radius: 8px;
+    background-color: var(--card);
+    border: 1px solid var(--border);
+    font-size: 20px;
+    font-weight: 600;
+  }
+
+  .pattern-menu {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    width: 100%;
+    padding-bottom: calc(168px + env(safe-area-inset-bottom));
+  }
+
+  .mobile-cat-pills {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding: 10px 14px;
+    background-color: var(--bg);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .cat-pill {
+    min-height: 44px;
+    padding: 0 14px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background-color: var(--card);
+    color: var(--text-muted);
+    font-size: 14px;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .cat-pill.is-active {
+    background-color: var(--blue-bg);
+    border-color: var(--blue);
+    color: var(--blue-text);
+    font-weight: 600;
+  }
+
+  .cat-pill-count {
+    font-size: 12px;
+    opacity: 0.85;
+  }
+
+  .pattern-main {
+    padding: 14px;
+  }
+
+  .pattern-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .pattern-card-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .pattern-card-bottom {
+    display: none;
+  }
+
+  .pattern-card-jianpu {
+    font-size: 17px;
+    font-weight: 700;
+  }
+
+  /* 手機版底部固定區（摘要 + 開始練唱） */
+  .mobile-bottom-bar {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: calc(52px + env(safe-area-inset-bottom));
+    padding: 10px 14px;
+    background-color: var(--panel);
+    border-top: 1px solid var(--border);
+    z-index: 20;
+  }
+
+  .mobile-summary-btn {
+    min-height: 44px;
+    padding: 0 12px;
+    border-radius: 8px;
+    background-color: var(--card);
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 13px;
+  }
+
+  .mobile-summary-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text);
+  }
+
+  .mobile-summary-action {
+    color: var(--blue);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .mobile-start-btn {
+    width: 100%;
+  }
+
+  /* 手機版底部分頁列 */
+  .mobile-tabbar {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: calc(52px + env(safe-area-inset-bottom));
+    padding-bottom: env(safe-area-inset-bottom);
+    background-color: var(--panel);
+    border-top: 1px solid var(--border);
+    z-index: 25;
+  }
+
+  .mobile-tab {
+    min-height: 44px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-muted);
+  }
+
+  .mobile-tab.is-active {
+    color: var(--blue);
+    font-weight: 700;
+  }
+
+  /* 全螢幕設定 Sheet */
+  .mobile-sheet-backdrop {
+    position: fixed;
+    inset: 0;
+    background-color: var(--bg);
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .mobile-sheet {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+
+  .mobile-sheet-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: env(safe-area-inset-top) 16px 0;
+    height: calc(56px + env(safe-area-inset-top));
+    background-color: var(--panel);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .mobile-sheet-header h3 {
+    margin: 0;
+    font-size: 17px;
+  }
+
+  .mobile-sheet-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 16px calc(24px + env(safe-area-inset-bottom));
+  }
+
+  .mobile-sheet-body .settings-panel {
+    height: auto;
+  }
+
+  .mobile-sheet-body .settings-scroll-area {
+    overflow: visible;
+    padding: 0 0 12px;
+  }
+
+  .mobile-sheet-body .settings-footer {
+    padding: 12px 0 0;
+  }
+
+  .portrait-hint-banner {
+    display: block;
+  }
+
+  .practice-jianpu-display {
+    font-size: 26px;
+  }
+}
+
+
+/* ==========================================================================
+   正式練唱畫面（#/practice）
+   ========================================================================== */
+
+.practice-portrait-guard {
+  flex: 1;
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 24px;
+  background-color: var(--bg);
+  color: var(--text);
+  text-align: center;
+}
+
+.rotate-phone-icon {
+  color: var(--text-muted);
+}
+
+.rotate-phone-text {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.practice-page {
+  flex: 1;
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background-color: var(--bg);
+  padding: max(4px, env(safe-area-inset-top))
+    max(48px, env(safe-area-inset-right))
+    max(10px, env(safe-area-inset-bottom))
+    max(48px, env(safe-area-inset-left));
+  gap: 4px;
+}
+
+.practice-page.is-tablet {
+  padding: 12px 24px max(16px, env(safe-area-inset-bottom));
+  gap: 10px;
+}
+
+/* 1. 標題列 */
+.practice-header {
+  height: 30px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.practice-page.is-tablet .practice-header {
+  height: 56px;
+  gap: 10px;
+}
+
+.practice-back-btn {
+  position: relative;
+  height: 26px;
+  min-width: 26px;
+  padding: 0 6px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background-color: var(--panel);
+  font-size: 18px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.practice-back-btn::before {
+  content: '';
+  position: absolute;
+  inset: -9px;
+}
+
+.practice-page.is-tablet .practice-back-btn {
+  height: 40px;
+  min-width: 40px;
+  font-size: 24px;
+  border-radius: 10px;
+}
+
+.practice-only-selected-btn {
+  position: relative;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background-color: var(--panel);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.practice-only-selected-btn::before {
+  content: '';
+  position: absolute;
+  inset: -9px 0;
+}
+
+.practice-only-selected-btn.is-on {
+  border: 1.5px solid #e8b400;
+  background-color: rgba(232, 180, 0, 0.14);
+  color: #f3d36b;
+  font-weight: 700;
+}
+
+.practice-only-selected-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.practice-page.is-tablet .practice-only-selected-btn {
+  height: 40px;
+  padding: 0 12px;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+/* 調名方塊列（flex: 1，左右捲動＋右緣漸層） */
+.key-strip-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+
+.key-strip-wrap.is-tablet {
+  height: 56px;
+}
+
+.key-strip-wrap::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 24px;
+  background: linear-gradient(to right, rgba(23, 27, 36, 0), var(--bg));
+  pointer-events: none;
+  z-index: 4;
+}
+
+.key-strip {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 22px 2px 0;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
+}
+
+.key-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.key-strip.is-dragging {
+  touch-action: none;
+}
+
+.key-strip-wrap.is-tablet .key-strip {
+  gap: 8px;
+  padding: 4px 26px 4px 0;
+}
+
+.key-chip {
+  position: relative;
+  flex-shrink: 0;
+  height: 26px;
+  min-width: 32px;
+  padding: 0 7px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background-color: var(--panel);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.key-strip-wrap.is-tablet .key-chip {
+  height: 40px;
+  min-width: 52px;
+  padding: 0 11px;
+  border-radius: 10px;
+  font-size: 16px;
+}
+
+.key-chip.is-past,
+.key-chip.is-filtered-out {
+  opacity: 0.45;
+}
+
+.key-chip.is-selected {
+  border: 1.5px solid #e8b400;
+  background-color: rgba(232, 180, 0, 0.14);
+  color: #f3d36b;
+  font-weight: 700;
+}
+
+.key-chip.is-current {
+  border-color: #4ca4ff;
+  background-color: #4ca4ff;
+  color: #0d1522;
+  font-weight: 700;
+  opacity: 1;
+}
+
+.key-chip.is-dragging {
+  z-index: 10;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5);
+  touch-action: none;
+  cursor: grabbing;
+}
+
+.key-chip.is-drop-target {
+  outline: 2px dashed #e8b400;
+  outline-offset: 1px;
+}
+
+.key-chip-badge {
+  position: absolute;
+  top: -2px;
+  right: -3px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background-color: #e8b400;
+  color: #171b24;
+  font-size: 8px;
+  font-weight: 800;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.key-strip-wrap.is-tablet .key-chip-badge {
+  top: -4px;
+  right: -4px;
+  width: 16px;
+  height: 16px;
+  font-size: 10px;
+}
+
+.practice-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.practice-pill-btn {
+  position: relative;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background-color: var(--panel);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.practice-pill-btn::before {
+  content: '';
+  position: absolute;
+  inset: -9px 0;
+}
+
+.practice-page.is-tablet .practice-pill-btn {
+  height: 38px;
+  padding: 0 14px;
+  font-size: 14px;
+}
+
+.rec-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: #64748b;
+}
+
+.practice-gear-btn {
+  position: relative;
+  height: 26px;
+  width: 26px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background-color: var(--panel);
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.practice-gear-btn::before {
+  content: '';
+  position: absolute;
+  inset: -9px;
+}
+
+.practice-page.is-tablet .practice-gear-btn {
+  height: 38px;
+  width: 38px;
+  font-size: 18px;
+}
+
+/* 2. 主工作區：譜面 + 把手列 + 鋼琴 */
+.practice-workspace {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.practice-page.is-tablet .practice-workspace {
+  gap: 10px;
+}
+
+/* 2a. 譜面紙張 */
+.sheet-paper {
+  background-color: #f6f4ee;
+  color: #2c2c2a;
+  border-radius: 12px;
+  padding: 2px 0;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.practice-page.is-tablet .sheet-paper {
+  padding: 8px 0;
+}
+
+.sheet-error {
+  padding: 2px 12px;
+  color: #c62828;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* cents 色條 */
+.cents-bar {
+  height: 24px;
+  padding: 2px 14px 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.cents-bar.is-tablet {
+  height: 37px;
+  padding: 4px 20px 0;
+}
+
+.cents-track-wrap {
+  position: relative;
+  height: 6px;
+  display: flex;
+  align-items: center;
+}
+
+.cents-bar.is-tablet .cents-track-wrap {
+  height: 9px;
+}
+
+.cents-track {
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  display: flex;
+}
+
+.cents-bar.is-tablet .cents-track {
+  height: 9px;
+}
+
+.cents-seg {
+  display: block;
+  height: 100%;
+}
+
+.cents-seg-red {
+  background-color: #e24b4a;
+}
+
+.cents-seg-orange {
+  background-color: #ef9f27;
+}
+
+.cents-seg-green {
+  background-color: #97c459;
+}
+
+.cents-pointer {
+  position: absolute;
+  top: 50%;
+  width: 4px;
+  height: 12px;
+  border-radius: 2px;
+  background-color: #2c2c2a;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.cents-bar.is-tablet .cents-pointer {
+  width: 5px;
+  height: 16px;
+}
+
+.cents-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  line-height: 1.2;
+  color: #5f5e5a;
+  margin-top: 2px;
+}
+
+.cents-bar.is-tablet .cents-labels {
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+/* 簡譜帶 + 五線譜共用座標容器 */
+.sheet-score-area {
+  position: relative;
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-evenly;
+}
+
+.score-line {
+  position: relative;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.score-line.is-preview {
+  opacity: 0.55;
+}
+
+.score-line + .score-line {
+  border-top: 1px dashed rgba(44, 44, 42, 0.14);
+}
+
+.score-active-band {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 28px;
+  transform: translateX(-50%);
+  background-color: rgba(76, 164, 255, 0.14);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.practice-page.is-tablet .score-active-band {
+  width: 40px;
+}
+
+.score-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 1.5px dashed #185fa5;
+  pointer-events: none;
+  z-index: 3;
+}
+
+/* 簡譜帶 */
+.jianpu-strip {
+  position: relative;
+  height: 24px;
+  width: 100%;
+  z-index: 2;
+}
+
+.jianpu-strip.is-tablet {
+  height: 52px;
+}
+
+.jianpu-mode-tag {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 10px;
+  font-weight: 600;
+  color: #5f5e5a;
+  white-space: nowrap;
+}
+
+.jianpu-mode-tag.is-preview-label {
+  color: #185fa5;
+  font-weight: 700;
+}
+
+.jianpu-strip.is-tablet .jianpu-mode-tag {
+  left: 14px;
+  font-size: 13px;
+}
+
+.jianpu-strip-item {
+  position: absolute;
+  bottom: 1px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1;
+  user-select: none;
+}
+
+.jianpu-strip-item.is-past {
+  color: #888780;
+}
+
+.jianpu-strip-item.is-current {
+  color: #185fa5;
+}
+
+.jianpu-strip-item.is-future {
+  color: #2c2c2a;
+}
+
+.jianpu-strip-solfege {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  margin-bottom: 1px;
+  white-space: nowrap;
+}
+
+.jianpu-strip-note {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.jianpu-strip-core {
+  display: inline-flex;
+  align-items: baseline;
+}
+
+.jianpu-strip-acc {
+  font-size: 12px;
+  font-weight: 700;
+  margin-right: 1px;
+}
+
+.jianpu-strip.is-tablet .jianpu-strip-acc {
+  font-size: 20px;
+}
+
+.jianpu-strip-digit {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.jianpu-strip.is-tablet .jianpu-strip-digit {
+  font-size: 38px;
+}
+
+.jianpu-strip-dots {
+  font-size: 7px;
+  line-height: 0.6;
+  letter-spacing: 0.5px;
+}
+
+.jianpu-strip.is-tablet .jianpu-strip-dots {
+  font-size: 10px;
+}
+
+.staff-svg {
+  display: block;
+  position: relative;
+  z-index: 2;
+}
+
+/* 把手列（譜面與鋼琴之間） */
+.piano-handle {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background-color: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 10px;
+  cursor: ns-resize;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.piano-handle-grip {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 22px;
+}
+
+.piano-handle-grip span {
+  display: block;
+  height: 1.5px;
+  width: 100%;
+  border-radius: 999px;
+  background-color: #7b8496;
+}
+
+.piano-handle-text {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.practice-page.is-tablet .piano-handle-text {
+  font-size: 12px;
+}
+
+/* 3. 對音鋼琴（真實幾何比例 SVG） */
+.piano-panel {
+  flex-shrink: 0;
+  background-color: #141820;
+  border-radius: 10px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.practice-page.is-tablet .piano-panel {
+  border-radius: 12px;
+}
+
+.piano-panel.is-collapsed {
+  border-radius: 6px;
+}
+
+.piano-scrollbar {
+  position: relative;
+  width: 100%;
+  flex-shrink: 0;
+  background-color: #1f2532;
+  border-bottom: 1px solid #2d3546;
+  touch-action: none;
+  cursor: ew-resize;
+}
+
+.piano-scrollbar-thumb {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 0;
+  border-radius: 999px;
+  background-color: #6b768c;
+}
+
+.piano-keyboard-viewport {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  outline: none;
+}
+
+.piano-keyboard-viewport.is-collapsed {
+  pointer-events: none;
+}
+
+.piano-svg {
+  display: block;
+  will-change: transform;
+}
+
+/* 4. 播放列（v2） */
+.transport-bar {
+  height: 30px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.transport-bar.is-tablet {
+  height: 64px;
+}
+
+.transport-left,
+.transport-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.transport-bar.is-tablet .transport-left,
+.transport-bar.is-tablet .transport-right {
+  gap: 10px;
+}
+
+.tb-btn {
+  position: relative;
+  height: 30px;
+  min-width: 30px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background-color: var(--panel);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* iPhone 擴大可點擊範圍至至少 44×44 */
+.tb-btn::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  min-width: 44px;
+  min-height: 44px;
+  width: 100%;
+  height: 100%;
+  transform: translate(-50%, -50%);
+}
+
+.transport-bar.is-tablet .tb-btn {
+  height: 48px;
+  min-width: 48px;
+  padding: 0 12px;
+  border-radius: 12px;
+  font-size: 18px;
+}
+
+.tb-btn-nav {
+  width: 60px;
+  padding: 0;
+}
+
+.transport-bar.is-tablet .tb-btn-nav {
+  width: 80px;
+}
+
+.tb-btn-primary {
+  width: 78px;
+  padding: 0;
+  background-color: var(--blue);
+  border-color: var(--blue);
+  color: #0d1522;
+}
+
+.transport-bar.is-tablet .tb-btn-primary {
+  width: 104px;
+}
+
+.tb-btn.is-boundary {
+  opacity: 0.45;
+}
+
+/* 每調重複次數鈕 */
+.tb-repeat-btn {
+  height: 30px;
+  background-color: #242b38;
+  border: 1px solid #374152;
+  padding: 0 8px;
+  gap: 4px;
+}
+
+.transport-bar.is-tablet .tb-repeat-btn {
+  height: 48px;
+  padding: 0 12px;
+  gap: 6px;
+}
+
+.tb-repeat-icon {
+  font-size: 11px;
+  line-height: 1;
+}
+
+.transport-bar.is-tablet .tb-repeat-icon {
+  font-size: 15px;
+}
+
+.tb-repeat-count {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.tb-repeat-progress {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.transport-bar.is-tablet .tb-repeat-progress {
+  font-size: 12px;
+}
+
+/* 播放列中間：音型名稱（自動字級） */
+.transport-center {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+}
+
+.transport-pattern-title {
+  display: block;
+  max-width: 100%;
+  font-weight: 700;
+  color: #edf0f7;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: 0.08em;
+  line-height: 1.1;
+  text-align: center;
+}
+
+/* 節拍器圖示按鈕：無外框無底色 */
+.metro-btn {
+  position: relative;
+  width: 38px;
+  height: 36px;
+  margin-top: -6px;
+  padding: 0;
+  border: none;
+  background: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.metro-btn::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  min-width: 44px;
+  min-height: 44px;
+  transform: translate(-50%, -50%);
+}
+
+.metro-btn.is-tablet {
+  width: 48px;
+  height: 54px;
+  margin-top: 0;
+}
+
+.metro-svg {
+  display: block;
+}
+
+/* 速度組與移調組共用深色圓角底 */
+.tb-pill-group {
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  background-color: #242b38;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 2px;
+}
+
+.transport-bar.is-tablet .tb-pill-group {
+  height: 48px;
+  border-radius: 12px;
+  padding: 0 4px;
+}
+
+.tb-pill-group .tb-step-btn {
+  height: 28px;
+  min-width: 26px;
+  padding: 0 6px;
+  border: none;
+  background: none;
+  border-radius: 6px;
+}
+
+.transport-bar.is-tablet .tb-pill-group .tb-step-btn {
+  height: 44px;
+  min-width: 38px;
+  padding: 0 10px;
+}
+
+.tb-bpm-value,
+.tb-transpose-value {
+  position: relative;
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 3px;
+  padding: 0 4px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+.tb-bpm-num {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.tb-bpm-unit {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.transport-bar.is-tablet .tb-bpm-num {
+  font-size: 17px;
+}
+
+.transport-bar.is-tablet .tb-bpm-unit {
+  font-size: 12px;
+}
+
+.tb-transpose-value {
+  min-width: 28px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.transport-bar.is-tablet .tb-transpose-value {
+  min-width: 38px;
+  font-size: 17px;
+}
+
+/* 鋼琴指示燈按鈕 */
+.tb-piano-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.tb-piano-btn {
+  width: 40px;
+  height: 30px;
+  padding: 0;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background-color: var(--panel);
+}
+
+.transport-bar.is-tablet .tb-piano-btn {
+  width: 56px;
+  height: 48px;
+  border-radius: 12px;
+}
+
+.tb-piano-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background-color: transparent;
+  border: 1.5px solid #4b5870;
+  transition: background-color 120ms ease, box-shadow 120ms ease;
+}
+
+.transport-bar.is-tablet .tb-piano-dot {
+  width: 13px;
+  height: 13px;
+}
+
+.tb-piano-btn.is-on .tb-piano-dot {
+  background-color: #5cda9a;
+  border-color: #5cda9a;
+  box-shadow: 0 0 6px 1px rgba(92, 218, 154, 0.75);
+}
+
+/* 提示泡泡（移調長按／首次鋼琴開關提示） */
+.tb-tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  padding: 5px 10px;
+  border-radius: 8px;
+  background-color: #242b38;
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  z-index: 20;
+}
+
+.tb-transpose-tip {
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.tb-piano-hint {
+  right: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tb-hint-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #5cda9a;
+  flex-shrink: 0;
+}
+
+.transpose-toast {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--orange);
+  white-space: nowrap;
+}
+
+.transport-bar.is-tablet .transpose-toast {
+  font-size: 14px;
+}
+
+/* ==========================================================================
+   麥克風開關、混亂提示泡泡與練唱 ⚙ 設定面板
+   ========================================================================== */
+
+.practice-mic-btn {
+  gap: 5px;
+}
+
+.practice-mic-icon {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.practice-mic-btn.is-on .practice-mic-icon {
+  color: #5cda9a;
+}
+
+.mic-toggle-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: transparent;
+  border: 1.5px solid #4b5870;
+  transition: background-color 120ms ease, box-shadow 120ms ease;
+}
+
+.practice-page.is-tablet .mic-toggle-dot {
+  width: 10px;
+  height: 10px;
+}
+
+.practice-mic-btn.is-on .mic-toggle-dot {
+  background-color: #5cda9a;
+  border-color: #5cda9a;
+  box-shadow: 0 0 6px 1px rgba(92, 218, 154, 0.75);
+}
+
+.sheet-paper {
+  position: relative;
+}
+
+.confusion-bubble {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  max-width: min(440px, calc(100% - 24px));
+  padding: 10px 12px;
+  border-radius: 10px;
+  background-color: rgba(36, 43, 56, 0.96);
+  border: 1px solid var(--orange);
+  color: var(--text);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 15;
+}
+
+.confusion-bubble-text {
+  font-size: 13px;
+  line-height: 1.45;
+  font-weight: 500;
+}
+
+.confusion-bubble-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.confusion-btn {
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background-color: var(--card);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.confusion-btn-primary {
+  border-color: var(--orange);
+  background-color: rgba(255, 180, 91, 0.16);
+  color: var(--orange);
+}
+
+/* 練唱頁 ⚙ 設定面板 */
+.practice-settings-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background-color: rgba(10, 14, 22, 0.68);
+  display: flex;
+}
+
+.practice-settings-backdrop.is-tablet {
+  justify-content: flex-end;
+}
+
+.practice-settings-backdrop.is-phone {
+  background-color: var(--bg);
+}
+
+.practice-settings-sheet {
+  background-color: var(--panel);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.practice-settings-sheet.is-phone {
+  width: 100%;
+  height: 100%;
+}
+
+.practice-settings-sheet.is-tablet {
+  width: 360px;
+  max-width: 92vw;
+  height: 100%;
+  border-left: 1px solid var(--border);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.35);
+}
+
+.practice-settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: max(12px, env(safe-area-inset-top)) 16px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.practice-settings-header h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.practice-settings-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 16px calc(24px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.setting-row-inline-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.setting-value-badge {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--blue-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.setting-range {
+  width: 100%;
+  height: 32px;
+  accent-color: var(--blue);
+  cursor: pointer;
+}
+
+.practice-setting-toggle {
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: 6px 0;
+}
+
+.practice-rec-row {
+  opacity: 0.72;
+  cursor: not-allowed;
+}
+
+.practice-rec-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mic-meter-card {
+  background-color: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mic-meter-track {
+  position: relative;
+  width: 100%;
+  height: 12px;
+  border-radius: 999px;
+  background-color: #141820;
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.mic-meter-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #4ca4ff 0%, #5cda9a 70%, #ffb45b 100%);
+  transition: width 40ms linear;
+}
+
+.mic-meter-gate {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2.5px;
+  background-color: #ff6b78;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.mic-meter-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.calibrate-btn {
+  min-height: 40px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--blue);
+  background-color: var(--blue-bg);
+  color: var(--blue-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.calib-msg {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.calib-msg.is-ok {
+  color: #5cda9a;
+}
+
+.calib-msg.is-error {
+  color: var(--danger);
+}

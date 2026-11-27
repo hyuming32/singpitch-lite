@@ -8,7 +8,7 @@ describe('compileExercise', () => {
   const majorArp = BUILTIN_PATTERNS.find((p) => p.id === 'major-arpeggio')!;
   const fifthGlide = BUILTIN_PATTERNS.find((p) => p.id === 'fifth-glide')!;
 
-  it('compiles major arpeggio with clicks, cadence, pad, and listen-then-sing', () => {
+  it('compiles major arpeggio with clicks, cadence, and listen-then-sing (no pad when cadence is on)', () => {
     const ex = buildExercise(majorArp, {
       startTonic: 60,
       low: 48,
@@ -51,17 +51,11 @@ describe('compileExercise', () => {
       'cadence:2:55',
     ]);
 
-    // 驗證 pad id 前綴
+    // 有 cadence 時不產生 pad 事件
     const padOn = compiled.events.filter(
       (e) => e.type === 'noteOn' && e.bus === 'pad',
     );
-    expect(padOn.length).toBeGreaterThan(0);
-    for (const p of padOn) {
-      if (p.type === 'noteOn') {
-        expect(p.id.startsWith('pad:')).toBe(true);
-        expect(p.held).toBe(true);
-      }
-    }
+    expect(padOn).toHaveLength(0);
 
     // 驗證事件依 frame 排序，且每個 noteOn 都有對應 noteOff
     const activeIds = new Set<string>();
@@ -83,6 +77,36 @@ describe('compileExercise', () => {
       }
     }
     expect(activeIds.size).toBe(0);
+  });
+
+  it('compiles pad noteOn events when cadence is off and pad is true', () => {
+    const ex = buildExercise(majorArp, {
+      startTonic: 60,
+      low: 48,
+      high: 79,
+      bpm: 120,
+      cadence: 'off',
+      countInBeats: 0,
+      repeats: 1,
+      transpose: 'fixed',
+    });
+
+    const compiled = compileExercise(ex, rate, {
+      pianoDuringSing: true,
+      pad: true,
+      click: false,
+    });
+
+    const padOn = compiled.events.filter(
+      (e) => e.type === 'noteOn' && e.bus === 'pad',
+    );
+    expect(padOn.length).toBeGreaterThan(0);
+    for (const p of padOn) {
+      if (p.type === 'noteOn') {
+        expect(p.id.startsWith('pad:')).toBe(true);
+        expect(p.held).toBe(true);
+      }
+    }
   });
 
   it('omits sing notes when pianoDuringSing is false while keeping listen notes', () => {

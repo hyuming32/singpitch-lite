@@ -674,11 +674,32 @@ button:disabled {
   cursor: pointer;
 }
 
+.toggle-item.is-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.toggle-label-group {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.toggle-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 .toggle-item input[type='checkbox'] {
   width: 20px;
   height: 20px;
   accent-color: var(--blue);
   cursor: pointer;
+}
+
+.toggle-item input[type='checkbox']:disabled {
+  cursor: not-allowed;
 }
 
 .settings-summary-box {

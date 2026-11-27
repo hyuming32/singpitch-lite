@@ -277,7 +277,8 @@ export function buildExercise(
     const notesStart = tCursor;
 
     const emitPass = (pass: number, phase: 'listen' | 'sing') => {
-      if (chordRomans.length > 0) {
+      // 有換調引導和弦（cadence !== 'off'）時，唱的中間不再產生 pad 墊底和弦
+      if (cadenceMode === 'off' && chordRomans.length > 0) {
         const chordDur = passDur / chordRomans.length;
         for (let ci = 0; ci < chordRomans.length; ci++) {
           const roman = chordRomans[ci]!;

@@ -64,6 +64,13 @@ const CADENCE_OPTIONS: { value: CadenceMode; label: string }[] = [
   { value: 'single', label: '單和弦快切' },
 ];
 
+/** 計算試聽時是否啟用和弦墊底：僅在提示和弦關閉時依 settings.pad 決定 */
+export function resolvePreviewPad(
+  settings: Pick<PracticeSettings, 'cadence' | 'pad'>,
+): boolean {
+  return settings.cadence === 'off' && settings.pad;
+}
+
 /** 右側練習設定面板（含試聽與開始練唱） */
 export function SettingsPanel({
   pattern,
@@ -186,7 +193,7 @@ export function SettingsPanel({
       engine.setA4(settings.a4);
       engine.load(previewEx, {
         pianoDuringSing: true,
-        pad: settings.pad,
+        pad: resolvePreviewPad(settings),
         click: false,
         voiceForGlide: true,
       });
@@ -420,14 +427,25 @@ export function SettingsPanel({
 
         {/* 開關 */}
         <div className="toggle-list">
-          <label className="toggle-item">
-            <span>和弦墊底</span>
-            <input
-              type="checkbox"
-              checked={settings.pad}
-              onChange={(e) => onUpdate({ pad: e.target.checked })}
-            />
-          </label>
+          {(() => {
+            const padDisabled = settings.cadence !== 'off';
+            return (
+              <label className={`toggle-item${padDisabled ? ' is-disabled' : ''}`}>
+                <span className="toggle-label-group">
+                  <span>和弦墊底</span>
+                  {padDisabled && (
+                    <span className="toggle-hint">有提示和弦時不墊底</span>
+                  )}
+                </span>
+                <input
+                  type="checkbox"
+                  checked={settings.pad}
+                  disabled={padDisabled}
+                  onChange={(e) => onUpdate({ pad: e.target.checked })}
+                />
+              </label>
+            );
+          })()}
           <label className="toggle-item">
             <span>節拍器預備拍</span>
             <input

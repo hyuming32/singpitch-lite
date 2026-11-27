@@ -194,7 +194,7 @@ describe('exercise', () => {
     }
   });
 
-  it('repeats=3 時 cadence 只出現在每個調第 1 遍之前、總時長相應縮短、pad 每遍皆有', () => {
+  it('repeats=3 時 cadence 只出現在每個調第 1 遍之前、總時長相應縮短、有 cadence 時不產生 pad', () => {
     const baseOpts = {
       startTonic: 60,
       low: 48,
@@ -234,10 +234,13 @@ describe('exercise', () => {
       }
     }
 
-    // pad 伴奏和弦不受影響，每個調的每一遍都有
+    // 有 cadence 時不產生 pad；cadence 關閉時 pad 照舊每遍都有
     const chordCountPerPass = majorArp.chords.trim().split(/\s+/).length;
     const padChords = withCadence.chords.filter((c) => c.role === 'pad');
-    expect(padChords).toHaveLength(numKeys * 3 * chordCountPerPass);
+    expect(padChords).toHaveLength(0);
+    expect(withoutCadence.chords.filter((c) => c.role === 'pad')).toHaveLength(
+      numKeys * 3 * chordCountPerPass,
+    );
 
     // 總時長僅多出「第 1 調 1.5 秒 + 其餘調各 2.0 秒」，而非「調數 × repeats × cadence」
     const expectedCadenceDur = 1.5 + (numKeys - 1) * 2.0;
@@ -283,11 +286,8 @@ describe('exercise', () => {
       expect(lateCadence).toHaveLength(0);
     }
 
-    // pad 涵蓋示範 + 3 遍唱（共 4 遍）
-    const chordCountPerPass = majorArp.chords.trim().split(/\s+/).length;
-    expect(ex.chords.filter((c) => c.role === 'pad')).toHaveLength(
-      2 * 4 * chordCountPerPass,
-    );
+    // 有 cadence 時不產生 pad 伴奏和弦
+    expect(ex.chords.filter((c) => c.role === 'pad')).toHaveLength(0);
   });
 
   it('∞ 循環 seek 位置跳過 cadence 區段（follow 與 listen-then-sing 皆適用）', () => {
@@ -531,5 +531,37 @@ describe('exercise', () => {
     for (const c of cad) {
       expect(c.midis).toHaveLength(3);
     }
+  });
+
+  it('direct、leading、single 模式下不產生 pad 事件且 cadence 事件數維持不變；off 模式照舊產生 pad', () => {
+    const baseOpts = {
+      startTonic: 60,
+      low: 48,
+      high: 79,
+      bpm: 120,
+      repeats: 2,
+      tonicList: [60, 62],
+    };
+
+    const expectedCadenceCount = {
+      direct: 1 + 2,
+      leading: 3 + 4,
+      single: 2 * 2,
+    } as const;
+
+    for (const mode of ['direct', 'leading', 'single'] as const) {
+      const ex = buildExercise(majorArp, { ...baseOpts, cadence: mode });
+      expect(ex.chords.filter((c) => c.role === 'pad')).toHaveLength(0);
+      expect(ex.chords.filter((c) => c.role === 'cadence')).toHaveLength(
+        expectedCadenceCount[mode],
+      );
+    }
+
+    const offEx = buildExercise(majorArp, { ...baseOpts, cadence: 'off' });
+    const chordCountPerPass = majorArp.chords.trim().split(/\s+/).length;
+    expect(offEx.chords.filter((c) => c.role === 'cadence')).toHaveLength(0);
+    expect(offEx.chords.filter((c) => c.role === 'pad')).toHaveLength(
+      2 * 2 * chordCountPerPass,
+    );
   });
 });

@@ -3,6 +3,7 @@ import { buildExercise } from '../core/exercise';
 import { displayNoteName } from './noteLabel';
 import { BUILTIN_PATTERNS, type PatternDef } from '../core/patterns';
 import {
+  formatBpm,
   toExerciseOptions,
   type PracticeSettings,
 } from '../state/settings';
@@ -89,7 +90,7 @@ export function PatternMenu({
     }
   }, [selectedPattern, settings]);
 
-  const mobileSummary = `${displayNoteName(settings.startTonic)} 起 · ${settings.rangeName} · ${settings.bpm} BPM · ${TRANSPOSE_LABELS[settings.transpose]}`;
+  const mobileSummary = `${displayNoteName(settings.startTonic)} 起 · ${settings.rangeName} · ${formatBpm(settings.bpm)} BPM · ${TRANSPOSE_LABELS[settings.transpose]}`;
 
   return (
     <div

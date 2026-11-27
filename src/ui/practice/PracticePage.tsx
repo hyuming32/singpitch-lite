@@ -30,11 +30,13 @@ import {
   type KeySelectionState,
 } from '../../state/keySelection';
 import {
+  clampBpm,
   getPatternSpan,
   getRangeBounds,
   nextRepeatsPerKey,
   repeatsPerKeyToCount,
   resolveVoiceDisplay,
+  stepBpm,
   toExerciseOptions,
   type PracticeSettings,
 } from '../../state/settings';
@@ -71,8 +73,8 @@ import {
   computeViewportLayout,
   type PianoCollapsedPref,
 } from './viewportLayout';
+import { usePracticeViewport } from './usePracticeViewport';
 import {
-  readViewportSize,
   resolvePracticeViewport,
   toLocalPoint,
 } from './viewportRotation';
@@ -87,6 +89,7 @@ import { TransportBar } from './TransportBar';
 interface PracticePageProps {
   settings: PracticeSettings;
   onUpdateSettings: (patch: Partial<PracticeSettings>) => void;
+  onInputActiveChange?: (active: boolean) => void;
   onBack: () => void;
 }
 
@@ -114,10 +117,12 @@ function median3(values: readonly number[]): number | null {
 export function PracticePage({
   settings,
   onUpdateSettings,
+  onInputActiveChange,
   onBack,
 }: PracticePageProps) {
   const engine = useAudioEngine();
-  const [viewport, setViewport] = useState(readViewportSize);
+  const [bpmEditing, setBpmEditing] = useState(false);
+  const viewport = usePracticeViewport(bpmEditing);
   const [sec, setSec] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -198,26 +203,7 @@ export function PracticePage({
     playing: false,
   });
 
-  // 追蹤視窗大小、visualViewport 與橫直向切換
-  useEffect(() => {
-    let rafId = 0;
-    const onResize = () => setViewport(readViewportSize());
-    const onOrientation = () => {
-      onResize();
-      rafId = requestAnimationFrame(onResize);
-    };
-    onResize();
-    window.addEventListener('resize', onResize);
-    window.addEventListener('orientationchange', onOrientation);
-    const vv = window.visualViewport;
-    vv?.addEventListener('resize', onResize);
-    return () => {
-      if (rafId) cancelAnimationFrame(rafId);
-      window.removeEventListener('resize', onResize);
-      window.removeEventListener('orientationchange', onOrientation);
-      vv?.removeEventListener('resize', onResize);
-    };
-  }, []);
+  // 視窗尺寸由 usePracticeViewport 追蹤（輸入期間暫停重算以避免 iOS 鍵盤彈出造成版面跳動）
 
   const {
     rotated,
@@ -916,29 +902,44 @@ export function PracticePage({
   }, []);
 
   function applyBpmChange(nextRaw: number) {
-    const nextBpm = Math.max(40, Math.min(200, Math.round(nextRaw)));
-    if (nextBpm === settings.bpm) {
+    const prevBpm = settingsRef.current.bpm;
+    const nextBpm = clampBpm(nextRaw);
+    if (nextBpm === prevBpm) {
       return;
     }
     const currentSec = getExtrapolatedSec();
-    const scaledSec = rescaleTime(currentSec, settings.bpm, nextBpm);
-    pendingSeekRef.current = { sec: scaledSec, resumePlay: playing };
+    const scaledSec = rescaleTime(currentSec, prevBpm, nextBpm);
+    const isPlaying = playingRef.current;
+    settingsRef.current = { ...settingsRef.current, bpm: nextBpm };
+    pendingSeekRef.current = { sec: scaledSec, resumePlay: isPlaying };
     lastPosRef.current = {
       sec: scaledSec,
       time: performance.now(),
-      playing,
+      playing: isPlaying,
     };
     setSec(scaledSec);
     onUpdateSettings({ bpm: nextBpm });
   }
 
-  function handleBpmStep(delta: -4 | 4) {
-    applyBpmChange(settings.bpm + delta);
+  function handleBpmStep(delta: -1 | 1) {
+    applyBpmChange(stepBpm(settingsRef.current.bpm, delta));
+  }
+
+  function handleBpmChange(nextBpm: number) {
+    applyBpmChange(nextBpm);
   }
 
   function handleBpmReset() {
     applyBpmChange(menuBpmRef.current);
   }
+
+  const handleBpmEditingChange = useCallback(
+    (editing: boolean) => {
+      setBpmEditing(editing);
+      onInputActiveChange?.(editing);
+    },
+    [onInputActiveChange],
+  );
 
   function handleTransposeStep(delta: -1 | 1) {
     const nextTonic = settings.startTonic + delta;
@@ -1749,7 +1750,9 @@ export function PracticePage({
           onUpdateSettings({ metronome: !settings.metronome })
         }
         onBpmStep={handleBpmStep}
+        onBpmChange={handleBpmChange}
         onBpmReset={handleBpmReset}
+        onBpmEditingChange={handleBpmEditingChange}
         onTransposeStep={handleTransposeStep}
         onTogglePiano={() =>
           onUpdateSettings({ pianoDuringSing: !settings.pianoDuringSing })

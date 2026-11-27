@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import type { RepeatsPerKeyOption } from '../../state/settings';
+import {
+  BPM_MAX,
+  BPM_MIN,
+  formatBpm,
+  type RepeatsPerKeyOption,
+} from '../../state/settings';
+import { useBpmEdit } from '../useBpmEdit';
+import { useHoldRepeat } from '../useHoldRepeat';
 import { computePatternTitleLayout } from './layout';
 import { MetronomeIcon } from './MetronomeIcon';
 
@@ -30,8 +37,10 @@ interface TransportBarProps {
   onNextKey: () => void;
   onCycleRepeats: () => void;
   onToggleMetronome: () => void;
-  onBpmStep: (delta: -4 | 4) => void;
+  onBpmStep: (delta: -1 | 1) => void;
+  onBpmChange: (bpm: number) => void;
   onBpmReset: () => void;
+  onBpmEditingChange?: (editing: boolean) => void;
   onTransposeStep: (delta: -1 | 1) => void;
   onTogglePiano: () => void;
 }
@@ -94,7 +103,9 @@ export function TransportBar({
   onCycleRepeats,
   onToggleMetronome,
   onBpmStep,
+  onBpmChange,
   onBpmReset,
+  onBpmEditingChange,
   onTransposeStep,
   onTogglePiano,
 }: TransportBarProps) {
@@ -104,8 +115,23 @@ export function TransportBar({
 
   const centerRef = useRef<HTMLDivElement | null>(null);
   const bpmPressTimerRef = useRef<number | null>(null);
+  const bpmLongPressedRef = useRef(false);
   const transposePressTimerRef = useRef<number | null>(null);
   const transposeTipHideTimerRef = useRef<number | null>(null);
+
+  const bpmEdit = useBpmEdit({
+    bpm,
+    onCommit: onBpmChange,
+    onEditingChange: onBpmEditingChange,
+  });
+  const minusBpmHold = useHoldRepeat({
+    onStep: () => onBpmStep(-1),
+    disabled: bpm <= BPM_MIN,
+  });
+  const plusBpmHold = useHoldRepeat({
+    onStep: () => onBpmStep(1),
+    disabled: bpm >= BPM_MAX,
+  });
 
   // 量測播放列中間實際可用寬度（扣除左右 padding），自動調整音型名稱字級
   useEffect(() => {
@@ -162,11 +188,14 @@ export function TransportBar({
   }, []);
 
   function startBpmLongPress() {
+    if (bpmEdit.editing) return;
+    bpmLongPressedRef.current = false;
     if (bpmPressTimerRef.current !== null) {
       window.clearTimeout(bpmPressTimerRef.current);
     }
     bpmPressTimerRef.current = window.setTimeout(() => {
       bpmPressTimerRef.current = null;
+      bpmLongPressedRef.current = true;
       onBpmReset();
     }, LONG_PRESS_MS);
   }
@@ -293,28 +322,55 @@ export function TransportBar({
             type="button"
             className="tb-btn tb-step-btn"
             aria-label="降低速度"
-            disabled={bpm <= 40}
-            onClick={() => onBpmStep(-4)}
+            disabled={bpm <= BPM_MIN}
+            onContextMenu={(e) => e.preventDefault()}
+            {...minusBpmHold}
           >
             −
           </button>
           <span
-            className="tb-bpm-value"
-            title="長按回到選單設定的速度"
+            className={`tb-bpm-value ${bpmEdit.editing ? 'is-editing' : ''}`}
+            title="點此輸入速度，長按回到選單設定的速度"
+            role={bpmEdit.editing ? undefined : 'button'}
+            tabIndex={bpmEdit.editing ? undefined : 0}
+            aria-label={
+              bpmEdit.editing
+                ? undefined
+                : `速度 ${formatBpm(bpm)} BPM，點此直接輸入`
+            }
             onPointerDown={startBpmLongPress}
             onPointerUp={cancelBpmLongPress}
             onPointerLeave={cancelBpmLongPress}
             onPointerCancel={cancelBpmLongPress}
+            onClick={() => {
+              if (bpmEdit.editing) return;
+              if (bpmLongPressedRef.current) {
+                bpmLongPressedRef.current = false;
+                return;
+              }
+              bpmEdit.startEdit();
+            }}
+            onKeyDown={(e) => {
+              if (!bpmEdit.editing && (e.key === 'Enter' || e.key === ' ')) {
+                e.preventDefault();
+                bpmEdit.startEdit();
+              }
+            }}
           >
-            <strong className="tb-bpm-num">{bpm}</strong>
+            {bpmEdit.editing ? (
+              <input {...bpmEdit.inputProps} className="tb-bpm-input" />
+            ) : (
+              <strong className="tb-bpm-num">{formatBpm(bpm)}</strong>
+            )}
             <span className="tb-bpm-unit">BPM</span>
           </span>
           <button
             type="button"
             className="tb-btn tb-step-btn"
             aria-label="提高速度"
-            disabled={bpm >= 200}
-            onClick={() => onBpmStep(4)}
+            disabled={bpm >= BPM_MAX}
+            onContextMenu={(e) => e.preventDefault()}
+            {...plusBpmHold}
           >
             ＋
           </button>

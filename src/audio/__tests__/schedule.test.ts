@@ -174,4 +174,40 @@ describe('compileExercise', () => {
       }
     }
   });
+
+  it('supports decimal bpm=72.5 with beat interval 60/72.5 sec (< 1 sample error)', () => {
+    const bpm = 72.5;
+    const expectedBeatSec = 60 / bpm;
+    const expectedBeatFrames = expectedBeatSec * rate;
+
+    const ex = buildExercise(majorArp, {
+      startTonic: 60,
+      low: 48,
+      high: 79,
+      bpm,
+      cadence: false,
+      countInBeats: 4,
+      mode: 'follow',
+      repeats: 1,
+      transpose: 'fixed',
+    });
+
+    const compiled = compileExercise(ex, rate, {
+      beatClicks: true,
+      bpm,
+      click: true,
+    });
+
+    const clicks = compiled.events.filter((e) => e.type === 'click');
+    expect(clicks.length).toBeGreaterThan(4);
+
+    for (let i = 0; i < clicks.length; i++) {
+      const expectedFrame = i * expectedBeatFrames;
+      expect(Math.abs(clicks[i]!.frame - expectedFrame)).toBeLessThan(1);
+      if (i > 0) {
+        const intervalSec = (clicks[i]!.frame - clicks[i - 1]!.frame) / rate;
+        expect(Math.abs(intervalSec - expectedBeatSec)).toBeLessThan(1 / rate);
+      }
+    }
+  });
 });

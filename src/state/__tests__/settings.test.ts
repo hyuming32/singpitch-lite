@@ -6,17 +6,22 @@ import {
   MALE_RANGES,
   NORMAL_RANGES,
   SETTINGS_STORAGE_KEY,
+  clampBpm,
   clampStartTonic,
+  filterBpmInputChars,
   findLowestFeasibleTonic,
+  formatBpm,
   formatExerciseSummary,
   loadSettings,
   nextRepeatsPerKey,
+  parseBpmInput,
   rangesForVoice,
   repeatsPerKeyToCount,
   resolveRangeForVoice,
   resolveVoiceDisplay,
   sanitizeSettings,
   saveSettings,
+  stepBpm,
   switchVoiceSettings,
   toExerciseOptions,
   type PracticeSettings,
@@ -343,5 +348,65 @@ describe('聲部與譜號設定（voice / maleClef / resolveVoiceDisplay）', ()
     expect(patch.rangeName).toBe('男中音');
     // 男中音 [43, 67] 搭配大三和弦分解 (0..12)，最高可行 startTonic 為 55
     expect(patch.startTonic).toBe(55);
+  });
+});
+
+describe('BPM 小數存取、解析、格式化與 ±1 步進', () => {
+  it('支援一位小數存取、四捨五入 0.1、夾住 40.0–208.0 與舊整數設定相容', () => {
+    const storage = createMemoryStorage();
+    saveSettings({ ...DEFAULT_SETTINGS, bpm: 72.55 }, storage);
+    expect(loadSettings(storage).bpm).toBe(72.6);
+
+    saveSettings({ ...DEFAULT_SETTINGS, bpm: 208 }, storage);
+    expect(loadSettings(storage).bpm).toBe(208);
+
+    expect(sanitizeSettings({ bpm: 72.5 }).bpm).toBe(72.5);
+    expect(sanitizeSettings({ bpm: 72.54 }).bpm).toBe(72.5);
+    expect(sanitizeSettings({ bpm: 72.55 }).bpm).toBe(72.6);
+    expect(sanitizeSettings({ bpm: 300 }).bpm).toBe(208);
+    expect(sanitizeSettings({ bpm: 10 }).bpm).toBe(40);
+    // 舊整數設定維持相容
+    expect(sanitizeSettings({ bpm: 96 }).bpm).toBe(96);
+    expect(sanitizeSettings({ bpm: 200 }).bpm).toBe(200);
+    expect(clampBpm(Number.NaN)).toBe(DEFAULT_SETTINGS.bpm);
+  });
+
+  it('parseBpmInput 正確解析有效字串、四捨五入、夾住範圍與拒絕非法輸入', () => {
+    expect(parseBpmInput('72.5')).toBe(72.5);
+    expect(parseBpmInput('72.55')).toBe(72.6);
+    expect(parseBpmInput('abc')).toBeNull();
+    expect(parseBpmInput('300')).toBe(208);
+    expect(parseBpmInput('30')).toBe(40);
+    expect(parseBpmInput('')).toBeNull();
+    expect(parseBpmInput('   ')).toBeNull();
+    expect(parseBpmInput('.')).toBeNull();
+    expect(parseBpmInput('72.5.1')).toBeNull();
+    expect(parseBpmInput('-50')).toBeNull();
+    expect(parseBpmInput('96.0')).toBe(96);
+    expect(parseBpmInput(' 72.5 ')).toBe(72.5);
+  });
+
+  it('filterBpmInputChars 只保留數字與最多一個小數點', () => {
+    expect(filterBpmInputChars('72.5')).toBe('72.5');
+    expect(filterBpmInputChars('7a2.5.3b')).toBe('72.53');
+    expect(filterBpmInputChars('abc')).toBe('');
+    expect(filterBpmInputChars('..1')).toBe('.1');
+  });
+
+  it('formatBpm 整數不顯示小數點、非整數顯示一位小數', () => {
+    expect(formatBpm(96)).toBe('96');
+    expect(formatBpm(96.0)).toBe('96');
+    expect(formatBpm(72.5)).toBe('72.5');
+    expect(formatBpm(208.0)).toBe('208');
+    expect(formatBpm(72.04)).toBe('72');
+    expect(formatBpm(72.55)).toBe('72.6');
+  });
+
+  it('stepBpm ±1 時保留小數部分並夾在 40.0–208.0', () => {
+    expect(stepBpm(72.5, 1)).toBe(73.5);
+    expect(stepBpm(72.5, -1)).toBe(71.5);
+    expect(stepBpm(72.3, 1)).toBe(73.3);
+    expect(stepBpm(207.5, 1)).toBe(208);
+    expect(stepBpm(40.5, -1)).toBe(40);
   });
 });

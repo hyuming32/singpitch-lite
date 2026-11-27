@@ -140,6 +140,17 @@ describe('practice layout', () => {
     expect(weightY(40)).toBe(6);
     expect(weightY(208)).toBe(16);
     expect(weightY(200)).toBeCloseTo(6 + (160 / 168) * 10, 6);
+
+    // 小數 BPM（72.5）擺動週期為 60/72.5 秒
+    const decimalBpm = 72.5;
+    const decimalBeatDur = 60 / decimalBpm;
+    expect(metronomeAngle(firstBeat, firstBeat, decimalBpm)).toBeCloseTo(26, 6);
+    expect(
+      metronomeAngle(firstBeat + decimalBeatDur * 0.5, firstBeat, decimalBpm),
+    ).toBeCloseTo(0, 6);
+    expect(
+      metronomeAngle(firstBeat + decimalBeatDur, firstBeat, decimalBpm),
+    ).toBeCloseTo(-26, 6);
   });
 
   it('調速時間換算與移調顯示格式正確', () => {

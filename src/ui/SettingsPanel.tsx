@@ -1,15 +1,20 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { buildExercise, type Exercise } from '../core/exercise';
 import { RANGES } from '../core/notes';
 import { displayNoteName } from './noteLabel';
 import type { PatternDef } from '../core/patterns';
 import {
+  BPM_MAX,
+  BPM_MIN,
+  clampBpm,
   clampStartTonic,
   findLowestFeasibleTonic,
+  formatBpm,
   formatExerciseSummary,
   getRangeBounds,
   rangesForVoice,
   resolveVoiceDisplay,
+  stepBpm,
   toExerciseOptions,
   type ArticulationOption,
   type NoteBeatsOption,
@@ -21,6 +26,8 @@ import { useAudioEngine } from './AudioContext';
 import { JianpuLine } from './JianpuLine';
 import { VoiceClefControls } from './VoiceClefControls';
 import { buildJianpuTokens } from './miniStaffData';
+import { useBpmEdit } from './useBpmEdit';
+import { useHoldRepeat } from './useHoldRepeat';
 
 interface SettingsPanelProps {
   pattern: PatternDef;
@@ -66,6 +73,37 @@ export function SettingsPanel({
   const engine = useAudioEngine();
   const [previewPlaying, setPreviewPlaying] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const bpmRef = useRef(settings.bpm);
+  bpmRef.current = settings.bpm;
+  const onUpdateRef = useRef(onUpdate);
+  onUpdateRef.current = onUpdate;
+
+  function handleBpmStep(delta: -1 | 1) {
+    const next = stepBpm(bpmRef.current, delta);
+    if (next === bpmRef.current) return;
+    bpmRef.current = next;
+    onUpdateRef.current({ bpm: next });
+  }
+
+  function handleBpmCommit(nextBpm: number) {
+    const next = clampBpm(nextBpm);
+    if (next === bpmRef.current) return;
+    bpmRef.current = next;
+    onUpdateRef.current({ bpm: next });
+  }
+
+  const minusBpmHold = useHoldRepeat({
+    onStep: () => handleBpmStep(-1),
+    disabled: settings.bpm <= BPM_MIN,
+  });
+  const plusBpmHold = useHoldRepeat({
+    onStep: () => handleBpmStep(1),
+    disabled: settings.bpm >= BPM_MAX,
+  });
+  const bpmEdit = useBpmEdit({
+    bpm: settings.bpm,
+    onCommit: handleBpmCommit,
+  });
 
   const jianpuTokens = useMemo(() => buildJianpuTokens(pattern, 60), [pattern]);
   const [low, high] = getRangeBounds(settings.rangeName);
@@ -257,18 +295,47 @@ export function SettingsPanel({
               type="button"
               className="stepper-btn"
               aria-label="減慢速度"
-              disabled={settings.bpm <= 40}
-              onClick={() => onUpdate({ bpm: Math.max(40, settings.bpm - 4) })}
+              disabled={settings.bpm <= BPM_MIN}
+              onContextMenu={(e) => e.preventDefault()}
+              {...minusBpmHold}
             >
               −
             </button>
-            <span className="stepper-value">{settings.bpm} BPM</span>
+            <span
+              className={`stepper-value stepper-bpm-value ${bpmEdit.editing ? 'is-editing' : ''}`}
+              role={bpmEdit.editing ? undefined : 'button'}
+              tabIndex={bpmEdit.editing ? undefined : 0}
+              aria-label={
+                bpmEdit.editing
+                  ? undefined
+                  : `速度 ${formatBpm(settings.bpm)} BPM，點此直接輸入`
+              }
+              onClick={() => {
+                if (!bpmEdit.editing) bpmEdit.startEdit();
+              }}
+              onKeyDown={(e) => {
+                if (!bpmEdit.editing && (e.key === 'Enter' || e.key === ' ')) {
+                  e.preventDefault();
+                  bpmEdit.startEdit();
+                }
+              }}
+            >
+              {bpmEdit.editing ? (
+                <>
+                  <input {...bpmEdit.inputProps} className="stepper-bpm-input" />
+                  <span className="stepper-bpm-unit">BPM</span>
+                </>
+              ) : (
+                `${formatBpm(settings.bpm)} BPM`
+              )}
+            </span>
             <button
               type="button"
               className="stepper-btn"
               aria-label="加快速度"
-              disabled={settings.bpm >= 200}
-              onClick={() => onUpdate({ bpm: Math.min(200, settings.bpm + 4) })}
+              disabled={settings.bpm >= BPM_MAX}
+              onContextMenu={(e) => e.preventDefault()}
+              {...plusBpmHold}
             >
               ＋
             </button>

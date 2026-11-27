@@ -117,11 +117,72 @@ export const DEFAULT_SETTINGS: PracticeSettings = {
   maleClef: 'treble8va',
 };
 
+export const BPM_MIN = 40;
+export const BPM_MAX = 208;
+
+/** 將 BPM 四捨五入至 0.1 並夾在 40.0–208.0 範圍內 */
+export function clampBpm(value: number): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_SETTINGS.bpm;
+  }
+  const rounded = Math.round(value * 10) / 10;
+  return Math.max(BPM_MIN, Math.min(BPM_MAX, rounded));
+}
+
+/** 依 delta（如 ±1）加減 BPM，保留小數部分並夾在允許範圍內 */
+export function stepBpm(current: number, delta: number): number {
+  return clampBpm(current + delta);
+}
+
+/** 過濾 BPM 輸入框字元，只保留數字與最多一個小數點 */
+export function filterBpmInputChars(raw: string): string {
+  let out = '';
+  let hasDot = false;
+  for (const ch of raw) {
+    if (ch >= '0' && ch <= '9') {
+      out += ch;
+    } else if (ch === '.' && !hasDot) {
+      out += '.';
+      hasDot = true;
+    }
+  }
+  return out;
+}
+
+/** 解析 BPM 輸入字串：有效數字回傳四捨五入至 0.1 並夾住範圍的值，非法輸入回傳 null */
+export function parseBpmInput(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (!/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(trimmed)) {
+    return null;
+  }
+  const num = Number(trimmed);
+  if (!Number.isFinite(num)) {
+    return null;
+  }
+  return clampBpm(num);
+}
+
+/** 格式化 BPM 顯示字串：整數不顯示小數點，非整數顯示一位小數 */
+export function formatBpm(bpm: number): string {
+  if (!Number.isFinite(bpm)) {
+    return String(DEFAULT_SETTINGS.bpm);
+  }
+  const rounded = Math.round(bpm * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+}
+
 function clampInt(value: unknown, min: number, max: number, fallback: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return fallback;
   }
   return Math.max(min, Math.min(max, Math.round(value)));
+}
+
+function sanitizeBpm(value: unknown, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return fallback;
+  }
+  return clampBpm(value);
 }
 
 function validateBoolean(value: unknown, fallback: boolean): boolean {
@@ -205,7 +266,7 @@ export function sanitizeSettings(raw: unknown): PracticeSettings {
     patternId,
     startTonic: clampInt(obj.startTonic, 24, 96, DEFAULT_SETTINGS.startTonic),
     rangeName,
-    bpm: clampInt(obj.bpm, 40, 200, DEFAULT_SETTINGS.bpm),
+    bpm: sanitizeBpm(obj.bpm, DEFAULT_SETTINGS.bpm),
     noteBeats,
     repeats: clampInt(obj.repeats, 1, 4, DEFAULT_SETTINGS.repeats),
     repeatsPerKey,

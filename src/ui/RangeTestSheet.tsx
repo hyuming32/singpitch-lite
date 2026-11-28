@@ -75,6 +75,10 @@ export function RangeTestSheet({
   step1MidiRef.current = step1Midi;
   const a4Ref = useRef(settings.a4);
   a4Ref.current = settings.a4;
+  const startTonicRef = useRef(settings.startTonic);
+  startTonicRef.current = settings.startTonic;
+  const patternRef = useRef(currentPattern);
+  patternRef.current = currentPattern;
 
   const stopMicAndTimers = useCallback(async () => {
     if (glideTimerRef.current !== null) {
@@ -114,8 +118,20 @@ export function RangeTestSheet({
       const res = buildMeasuredRangeResult(rawLow, rawHigh, usedMethod);
       setOutcome(res);
       if (res.ok) {
-        // 儲存我的音域（舒適區），尚未覆蓋目前 rangeName，待使用者點按鈕選定
-        onApplySettings({ myRange: res.myRange });
+        // 測完直接切到「我的音域」（起始音自動移進新音域）；
+        // 結果頁仍可改選「用推薦聲部」或重測
+        const nextStart = resolveStartTonicForRange(
+          patternRef.current,
+          startTonicRef.current,
+          res.myRange.low,
+          res.myRange.high,
+        );
+        onApplySettings({
+          myRange: res.myRange,
+          rangeName: MY_RANGE_NAME,
+          voice: res.myRange.voice,
+          ...(nextStart !== startTonicRef.current ? { startTonic: nextStart } : {}),
+        });
         setPhase('result');
       } else {
         setPhase('tooNarrow');

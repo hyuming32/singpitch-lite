@@ -279,6 +279,8 @@ export function PracticePage({
   repeatsPerKeyRef.current = settings.repeatsPerKey;
   const settingsOpenRef = useRef(settingsOpen);
   settingsOpenRef.current = settingsOpen;
+  // 自動噪音校正進行中（第一次開麥克風）：此時也要回報音量給校正
+  const autoCalibActiveRef = useRef(false);
   const prevEchoRef = useRef(settings.echoCancellation);
   const exerciseRef = useRef<Exercise | null>(null);
   const loopAnchorKeyRef = useRef(0);
@@ -1113,7 +1115,7 @@ export function PracticePage({
   const handleMicFrame = useCallback(
     (frame: MicPitchFrame) => {
       const cfg = settingsRef.current;
-      if (settingsOpenRef.current) {
+      if (settingsOpenRef.current || autoCalibActiveRef.current) {
         setLiveDb(frame.db);
       }
 
@@ -1366,6 +1368,7 @@ export function PracticePage({
   } = useNoiseCalibration({
     liveDb,
     onComplete: (result: NoiseGateResult) => {
+      autoCalibActiveRef.current = false;
       if (result.ok) {
         onUpdateSettings({
           noiseGateDb: result.gateDb,
@@ -1376,7 +1379,10 @@ export function PracticePage({
           2000,
         );
       } else {
-        onUpdateSettings({ noiseCalibrated: true });
+        // 沒收到音量資料（麥克風還沒真的開好）不算校正過，下次開麥克風再自動校正
+        if (result.reason !== 'empty') {
+          onUpdateSettings({ noiseCalibrated: true });
+        }
         const reasonText =
           result.reason === 'empty'
             ? '未收到麥克風音量資料'
@@ -1396,6 +1402,7 @@ export function PracticePage({
     if (micActive) {
       if (autoCalibrating) {
         cancelAutoCalibration();
+        autoCalibActiveRef.current = false;
         showAutoCalibBanner(null);
       }
       await stopMic();
@@ -1406,6 +1413,7 @@ export function PracticePage({
           text: '校正環境噪音中，請保持安靜（2 秒）',
           tone: 'info',
         });
+        autoCalibActiveRef.current = true;
         startAutoCalibration();
       }
     }

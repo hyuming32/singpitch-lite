@@ -20,6 +20,18 @@ import {
 } from '../../core/lyrics';
 import { buildMidiExercise } from '../../core/midiExercise';
 import {
+  applyScoreBarLongPressLoop,
+  findBarAtPassSec,
+  findPassWindowForLoopCheck,
+  normalizeMidiLoopBars,
+  resolveMidiLoopRangeSec,
+  shouldLoopBack,
+  snapAbsSecToNearestBeat,
+  toggleMidiLoopPoint,
+  type MidiLoopBars,
+  type MidiLoopRangeSec,
+} from '../../core/midiSeek';
+import {
   buildMidiMixLayers,
   resolveTrackRoles,
   shouldShowAccompSpeakerHint,
@@ -107,12 +119,16 @@ import {
   timeToX,
   tonicLabel,
   type NoteGlyph,
+  type PassWindow,
   type ScoreLine,
 } from './layout';
 import {
   buildMidiLineGlyphs,
   buildMidiMeasurePages,
   computeIntroCountdownBars,
+  computeMidiScrubSecPerPx,
+  computeScrubTargetSec,
+  findMidiSegmentAtX,
   midiLineTimeToX,
   midiMeasurePageIndexAtTime,
   midiMeasureScoreLines,
@@ -141,6 +157,7 @@ import { usePracticeViewport } from './usePracticeViewport';
 import {
   resolvePracticeViewport,
   toLocalPoint,
+  toLocalRect,
 } from './viewportRotation';
 import { PianoKeyboard } from '../piano/PianoKeyboard';
 import {
@@ -238,6 +255,35 @@ export function PracticePage({
   const [midiMetronomeOverride, setMidiMetronomeOverride] = useState<
     boolean | null
   >(null);
+  const [scrubPreviewSec, setScrubPreviewSec] = useState<number | null>(null);
+  const scrubPreviewSecRef = useRef<number | null>(null);
+  const isScrubbingRef = useRef(false);
+  const [flashBarNumber, setFlashBarNumber] = useState<number | null>(null);
+  const flashBarTimerRef = useRef<number | null>(null);
+  const scoreLongPressTimerRef = useRef<number | null>(null);
+  const scoreGestureRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    startTime: number;
+    maxDist: number;
+    mode: 'pending' | 'drag' | 'vertical' | 'long-press';
+    startSec: number;
+    secPerPx: number;
+    wasPlaying: boolean;
+    targetBarNumber: number | null;
+    targetBarAbsStartSec: number | null;
+  } | null>(null);
+  const lastLoopCheckSecRef = useRef(0);
+  const abLoopCooldownRef = useRef(0);
+  const midiLoopRangeRef = useRef<MidiLoopRangeSec | null>(null);
+  const passWindowsRef = useRef<PassWindow[]>([]);
+  const handleMidiSeekRef = useRef<
+    (
+      targetAbsSec: number,
+      seekOptions?: { expectedPlaying?: boolean; tolerance?: number },
+    ) => void
+  >(() => {});
   const [accompSpeakerHintOpen, setAccompSpeakerHintOpen] = useState(false);
   const accompSpeakerHintShownRef = useRef(false);
   const [shadowMicHintOpen, setShadowMicHintOpen] = useState(false);
@@ -310,6 +356,8 @@ export function PracticePage({
   const pendingSeekGuardRef = useRef<{
     targetSec: number;
     expiresAt: number;
+    expectedPlaying?: boolean;
+    tolerance?: number;
   } | null>(null);
   const suppressLoadPosRef = useRef(false);
   const lastPosRef = useRef<{ sec: number; time: number; playing: boolean }>({
@@ -347,14 +395,14 @@ export function PracticePage({
   const pitchShift = voiceDisplay.pitchShift;
   const octaveTag = voiceDisplay.octaveTag;
 
-  // 混音器只改音量匯流排；忽略 mixer 欄位，避免調整混音時重建練習、音訊重新 load 而停止播放
+  // 混音器只改音量匯流排、A–B 循環只決定跳轉區間；忽略 mixer 與 loop 欄位，避免調整時重建練習、音訊重新 load 而停止播放
   const stableMidiSourceRef = useRef<MidiPracticeSource | null>(null);
   const buildMidiSource = useMemo(() => {
     const prev = stableMidiSourceRef.current;
     if (
       prev &&
       midiSource &&
-      isSameMidiSourceIgnoringMixer(prev, midiSource)
+      isSameMidiSourceIgnoringMixerAndLoop(prev, midiSource)
     ) {
       return prev;
     }
@@ -408,19 +456,19 @@ export function PracticePage({
   }, [buildMidiSource]);
 
   const passLyrics = useMemo(() => {
-    if (!rawSongLyrics || !midiSource || !midiBuild?.res) {
+    if (!rawSongLyrics || !buildMidiSource || !midiBuild?.res) {
       return null;
     }
     const regionStartOrigSec = midiBuild.res.regionStartOrigSec ?? 0;
     const regionEndOrigSec =
-      midiBuild.res.regionEndOrigSec ?? midiSource.asset.duration;
+      midiBuild.res.regionEndOrigSec ?? buildMidiSource.asset.duration;
     return convertLyricsToPassTime(rawSongLyrics, {
-      offsetSec: resolveMidiLyricsOffset(midiSource.songSettings),
+      offsetSec: resolveMidiLyricsOffset(buildMidiSource.songSettings),
       regionStartOrigSec,
       regionEndOrigSec,
-      speedPercent: midiSource.songSettings.speedPercent,
+      speedPercent: buildMidiSource.songSettings.speedPercent,
     });
-  }, [rawSongLyrics, midiSource, midiBuild]);
+  }, [rawSongLyrics, buildMidiSource, midiBuild]);
 
   const hasLyrics = isMidiMode && Boolean(passLyrics && passLyrics.lines.length > 0);
   const showLyrics = hasLyrics && settings.lyricsVisible;
@@ -772,6 +820,42 @@ export function PracticePage({
   }, [isMidiMode, midiBuild, pattern, settings, pitchShift, selectedTonicList]);
   exerciseRef.current = exercise;
 
+  const tryTriggerAbLoop = useCallback((curSec: number): boolean => {
+    const loopRange = midiLoopRangeRef.current;
+    if (!loopRange || !playingRef.current) {
+      lastLoopCheckSecRef.current = curSec;
+      return false;
+    }
+    const now = performance.now();
+    if (now - abLoopCooldownRef.current < 120) {
+      return false;
+    }
+    const prevSec = lastLoopCheckSecRef.current;
+    const win = findPassWindowForLoopCheck(
+      passWindowsRef.current,
+      prevSec,
+      curSec,
+    );
+    if (!win) {
+      lastLoopCheckSecRef.current = curSec;
+      return false;
+    }
+    const decision = shouldLoopBack({
+      sec: curSec,
+      prevSec,
+      loopRange,
+      passStartSec: win.start,
+      leadSec: 0.03,
+    });
+    if (decision.shouldLoop) {
+      abLoopCooldownRef.current = now;
+      handleMidiSeekRef.current(decision.targetAbsSec);
+      return true;
+    }
+    lastLoopCheckSecRef.current = curSec;
+    return false;
+  }, []);
+
   // 訂閱播放位置與結束事件
   useEffect(() => {
     const triggerInfLoop = (
@@ -788,6 +872,7 @@ export function PracticePage({
       voiceGateRef.current.reset();
       setSungVersion((v) => v + 1);
       setInfLoopCount((c) => c + 1);
+      lastLoopCheckSecRef.current = loopTarget;
       lastPosRef.current = {
         sec: loopTarget,
         time: now,
@@ -807,10 +892,23 @@ export function PracticePage({
       }
       suppressLoadPosRef.current = false;
 
+      // 譜面拖曳期間暫停接收位置回報，避免覆蓋預覽游標或誤觸暫停狀態
+      if (isScrubbingRef.current) {
+        return;
+      }
+
       const guard = pendingSeekGuardRef.current;
       if (guard) {
-        if (performance.now() > guard.expiresAt || Math.abs(s - guard.targetSec) <= 0.5) {
+        const playingMatches =
+          guard.expectedPlaying === undefined ||
+          isPlaying === guard.expectedPlaying;
+        const tol = guard.tolerance ?? 0.5;
+        if (
+          performance.now() > guard.expiresAt ||
+          (playingMatches && Math.abs(s - guard.targetSec) <= tol)
+        ) {
           pendingSeekGuardRef.current = null;
+          lastLoopCheckSecRef.current = s;
         } else {
           return;
         }
@@ -845,6 +943,9 @@ export function PracticePage({
       }
 
       if (isPlaying && ex) {
+        if (tryTriggerAbLoop(s)) {
+          return;
+        }
         if (repeatsPerKeyRef.current === 'inf') {
           const anchorIdx = Math.max(
             0,
@@ -888,6 +989,30 @@ export function PracticePage({
     const unsubEnd = engine.onEnded(() => {
       const nowMs = Date.now();
       const ex = exerciseRef.current;
+      const loopRange = midiLoopRangeRef.current;
+      if (loopRange && ex) {
+        const lastWin =
+          passWindowsRef.current[passWindowsRef.current.length - 1];
+        if (lastWin) {
+          const absStart = lastWin.start + loopRange.startPassSec;
+          const absEnd = lastWin.start + loopRange.endPassSec;
+          const prevSec = lastLoopCheckSecRef.current;
+          // 若 B 就是該遍最後一小節且剛從範圍內播到曲尾，直接回跳 A 並繼續播放
+          if (
+            absEnd >= lastWin.end - 0.05 &&
+            prevSec >= absStart - 0.05 &&
+            prevSec < absEnd - 0.02
+          ) {
+            abLoopCooldownRef.current = performance.now();
+            handleMidiSeekRef.current(absStart, {
+              expectedPlaying: true,
+              tolerance: 0.25,
+            });
+            engine.play();
+            return;
+          }
+        }
+      }
       if (repeatsPerKeyRef.current === 'inf' && ex) {
         const anchorIdx = Math.max(
           0,
@@ -934,9 +1059,9 @@ export function PracticePage({
       flushLogSession(true);
       engine.stop();
     };
-  }, [engine, flushLogSession, persistLogEntry]);
+  }, [engine, flushLogSession, persistLogEntry, tryTriggerAbLoop]);
 
-  // 播放中以 requestAnimationFrame 外插秒數，讓藍色虛線平滑移動
+  // 播放中以 requestAnimationFrame 外插秒數，讓藍色虛線平滑移動並即時檢查 A–B 循環
   useEffect(() => {
     if (!playing || !exercise) return;
     let rafId = 0;
@@ -945,13 +1070,20 @@ export function PracticePage({
       const { sec: baseSec, time, playing: isPlaying } = lastPosRef.current;
       if (isPlaying) {
         const dt = (performance.now() - time) / 1000;
-        setSec(Math.min(total, baseSec + Math.max(0, dt)));
+        const nextSec = Math.min(total, baseSec + Math.max(0, dt));
+        if (!isScrubbingRef.current) {
+          if (tryTriggerAbLoop(nextSec)) {
+            rafId = requestAnimationFrame(tick);
+            return;
+          }
+          setSec(nextSec);
+        }
         rafId = requestAnimationFrame(tick);
       }
     };
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [playing, exercise]);
+  }, [playing, exercise, tryTriggerAbLoop]);
 
   const effectivePianoDuringSing = isShadowMode
     ? false
@@ -1021,6 +1153,7 @@ export function PracticePage({
       pendingSeekRef.current = null;
       suppressLoadPosRef.current = true;
       const clampedSec = Math.max(0, Math.min(exercise.total, pending.sec));
+      lastLoopCheckSecRef.current = clampedSec;
       lastPosRef.current = {
         sec: clampedSec,
         time: performance.now(),
@@ -1482,6 +1615,12 @@ export function PracticePage({
       if (boundaryTimerRef.current !== null) {
         window.clearTimeout(boundaryTimerRef.current);
       }
+      if (scoreLongPressTimerRef.current !== null) {
+        window.clearTimeout(scoreLongPressTimerRef.current);
+      }
+      if (flashBarTimerRef.current !== null) {
+        window.clearTimeout(flashBarTimerRef.current);
+      }
     };
   }, []);
 
@@ -1499,6 +1638,7 @@ export function PracticePage({
     const scaledSec = rescaleTime(currentSec, prevBpm, nextBpm);
     const isPlaying = playingRef.current;
     pendingSeekRef.current = { sec: scaledSec, resumePlay: isPlaying };
+    lastLoopCheckSecRef.current = scaledSec;
     lastPosRef.current = {
       sec: scaledSec,
       time: performance.now(),
@@ -1623,6 +1763,7 @@ export function PracticePage({
         engine.setGain('melodySing', settings.singPianoVolume / 100);
       }
       const currentSec = lastPosRef.current.sec;
+      lastLoopCheckSecRef.current = currentSec;
       if (currentSec > 0) {
         engine.seek(currentSec);
       }
@@ -1664,15 +1805,22 @@ export function PracticePage({
     handleMidiSeek(targetSec);
   }
 
-  function handleMidiSeek(targetAbsSec: number) {
+  function handleMidiSeek(
+    targetAbsSec: number,
+    seekOptions?: { expectedPlaying?: boolean; tolerance?: number },
+  ) {
     if (!exercise) return;
     const clampedSec = Math.max(0, Math.min(exercise.total, targetAbsSec));
-    if (playingRef.current) {
+    const expectPlay = seekOptions?.expectedPlaying ?? playingRef.current;
+    if (expectPlay) {
       pendingSeekGuardRef.current = {
         targetSec: clampedSec,
         expiresAt: performance.now() + 300,
+        expectedPlaying: seekOptions?.expectedPlaying,
+        tolerance: seekOptions?.tolerance ?? 0.25,
       };
     }
+    lastLoopCheckSecRef.current = clampedSec;
     rawSungRef.current = rawSungRef.current.filter((p) => p.t < clampedSec);
     lastEvaluatedShadowPassRef.current = null;
     voiceGateRef.current.reset();
@@ -1680,7 +1828,7 @@ export function PracticePage({
     lastPosRef.current = {
       sec: clampedSec,
       time: performance.now(),
-      playing: playingRef.current,
+      playing: expectPlay,
     };
     setSec(clampedSec);
     if (logSessionRef.current) {
@@ -1693,6 +1841,7 @@ export function PracticePage({
       engine.seek(clampedSec);
     }
   }
+  handleMidiSeekRef.current = handleMidiSeek;
 
   function handlePrevKey() {
     if (!exercise) return;
@@ -1717,6 +1866,7 @@ export function PracticePage({
     engine.stop();
     loopAnchorKeyRef.current = 0;
     setInfLoopCount(1);
+    lastLoopCheckSecRef.current = 0;
     lastPosRef.current = {
       sec: 0,
       time: performance.now(),
@@ -1902,10 +2052,68 @@ export function PracticePage({
   const maxLines = vpLayout.lineCount;
   const staffHeight = vpLayout.staffHeight;
 
+  const displaySec =
+    isMidiMode && scrubPreviewSec !== null ? scrubPreviewSec : sec;
+
   const midiScoreBars = useMemo(
     () => midiBuild?.res?.scoreBars ?? [],
     [midiBuild],
   );
+  const midiLoopBars = useMemo<MidiLoopBars>(() => {
+    if (!isMidiMode || !midiSource || midiScoreBars.length === 0) {
+      return {};
+    }
+    const minBar = midiScoreBars[0]!.barNumber;
+    const maxBar = midiScoreBars[midiScoreBars.length - 1]!.barNumber;
+    return normalizeMidiLoopBars(
+      midiSource.songSettings.loopStartBar,
+      midiSource.songSettings.loopEndBar,
+      minBar,
+      maxBar,
+    );
+  }, [
+    isMidiMode,
+    midiSource?.songSettings.loopStartBar,
+    midiSource?.songSettings.loopEndBar,
+    midiScoreBars,
+  ]);
+  const midiLoopRangeSec = useMemo(
+    () =>
+      isMidiMode
+        ? resolveMidiLoopRangeSec(
+            midiScoreBars,
+            midiLoopBars.loopStartBar,
+            midiLoopBars.loopEndBar,
+          )
+        : null,
+    [isMidiMode, midiScoreBars, midiLoopBars],
+  );
+  midiLoopRangeRef.current = midiLoopRangeSec;
+
+  // 若區間、移調或變速後原本的 A–B 小節號超出目前 scoreBars 範圍，自動清掉
+  useEffect(() => {
+    if (
+      !isMidiMode ||
+      !midiSource ||
+      !onUpdateMidiSongSettings ||
+      midiScoreBars.length === 0
+    ) {
+      return;
+    }
+    const rawA = midiSource.songSettings.loopStartBar;
+    const rawB = midiSource.songSettings.loopEndBar;
+    if (rawA === undefined && rawB === undefined) return;
+    const hasA =
+      rawA === undefined || midiScoreBars.some((b) => b.barNumber === rawA);
+    const hasB =
+      rawB === undefined || midiScoreBars.some((b) => b.barNumber === rawB);
+    if (!hasA || !hasB) {
+      const { loopStartBar: _a, loopEndBar: _b, ...rest } =
+        midiSource.songSettings;
+      onUpdateMidiSongSettings(midiSource.hash, rest);
+    }
+  }, [isMidiMode, midiSource, midiScoreBars, onUpdateMidiSongSettings]);
+
   const midiHeaderReserve = Math.ceil(
     staffLeftPad(activeKey, clef, vpLayout.sp) + 1.8 * vpLayout.sp + RIGHT_PAD,
   );
@@ -1917,7 +2125,9 @@ export function PracticePage({
         : [],
     [isMidiMode, exercise, midiScoreBars, midiAvailWidth, vpLayout.sp],
   );
-  const midiPageIdx = isMidiMode ? midiMeasurePageIndexAtTime(midiPages, sec) : 0;
+  const midiPageIdx = isMidiMode
+    ? midiMeasurePageIndexAtTime(midiPages, displaySec)
+    : 0;
 
   const lines = useMemo(() => {
     if (!exercise) return [];
@@ -1925,7 +2135,7 @@ export function PracticePage({
       return midiMeasureScoreLines(
         exercise,
         midiScoreBars,
-        sec,
+        displaySec,
         maxLines,
         midiAvailWidth,
         vpLayout.sp,
@@ -2001,7 +2211,7 @@ export function PracticePage({
       return [curr, previewLine];
     }
     return currIdx === 0 ? [curr, previewLine] : [previewLine, curr];
-  }, [exercise, isMidiMode, midiScoreBars, midiAvailWidth, vpLayout.sp, sec, maxLines, settings.repeatsPerKey, isPortrait]);
+  }, [exercise, isMidiMode, midiScoreBars, midiAvailWidth, vpLayout.sp, displaySec, sec, maxLines, settings.repeatsPerKey, isPortrait]);
 
   const sungByLine = useMemo(() => {
     const raw = rawSungRef.current;
@@ -2074,7 +2284,7 @@ export function PracticePage({
   const currentLineInfo = lines.find((l) => l.isCurrent);
 
   const countIn = exercise
-    ? countInDotStates(exercise, sec)
+    ? countInDotStates(exercise, displaySec)
     : { active: false, dots: [] };
 
   const shadowClickTimes = useMemo<number[]>(() => {
@@ -2153,14 +2363,15 @@ export function PracticePage({
     () => (exercise ? listPassWindows(exercise) : []),
     [exercise],
   );
+  passWindowsRef.current = passWindows;
   const activePassWin = useMemo(() => {
     if (passWindows.length === 0) return null;
-    if (sec < passWindows[0]!.start) return passWindows[0]!;
+    if (displaySec < passWindows[0]!.start) return passWindows[0]!;
     return (
-      passWindows.find((w) => sec >= w.start && sec < w.end) ??
+      passWindows.find((w) => displaySec >= w.start && displaySec < w.end) ??
       passWindows[passWindows.length - 1]!
     );
-  }, [passWindows, sec]);
+  }, [passWindows, displaySec]);
   const activePassStart = activePassWin?.start ?? exercise?.keys[0]?.start ?? 0;
   const totalPassDur =
     midiScoreBars.length > 0
@@ -2232,11 +2443,11 @@ export function PracticePage({
 
       const showPlayhead =
         line.isCurrent &&
-        sec >= line.start - 0.001 &&
-        sec <= line.end + 0.001;
+        displaySec >= line.start - 0.001 &&
+        displaySec <= line.end + 0.001;
       playheadX = showPlayhead
         ? midiLineTimeToX(
-            Math.max(line.start, Math.min(line.end, sec)),
+            Math.max(line.start, Math.min(line.end, displaySec)),
             midiData.segments,
             midiData.leftPad,
             midiData.rightEdge,
@@ -2246,7 +2457,7 @@ export function PracticePage({
         introCountdownBars = computeIntroCountdownBars(
           midiScoreBars,
           passStartSec,
-          sec,
+          displaySec,
         );
       }
     } else {
@@ -2288,7 +2499,7 @@ export function PracticePage({
         : null;
     }
 
-    const activeNoteIdx = line.isCurrent ? currentNoteIndex(glyphs, sec) : -1;
+    const activeNoteIdx = line.isCurrent ? currentNoteIndex(glyphs, displaySec) : -1;
     const activeGlyph = activeNoteIdx >= 0 ? glyphs[activeNoteIdx] : undefined;
     if (line.isCurrent && activeGlyph && !activeGlyph.isRest) {
       targetMidi = activeGlyph.midi;
@@ -2379,6 +2590,263 @@ export function PracticePage({
   });
 
   targetMidiRef.current = targetMidi;
+
+  function saveLoopBars(nextLoop: MidiLoopBars) {
+    if (!midiSource || !onUpdateMidiSongSettings) return;
+    const { loopStartBar: _a, loopEndBar: _b, ...rest } =
+      midiSource.songSettings;
+    onUpdateMidiSongSettings(midiSource.hash, {
+      ...rest,
+      ...(nextLoop.loopStartBar !== undefined
+        ? { loopStartBar: nextLoop.loopStartBar }
+        : {}),
+      ...(nextLoop.loopEndBar !== undefined
+        ? { loopEndBar: nextLoop.loopEndBar }
+        : {}),
+    });
+  }
+
+  function triggerBarFlash(barNumber: number) {
+    setFlashBarNumber(barNumber);
+    if (flashBarTimerRef.current !== null) {
+      window.clearTimeout(flashBarTimerRef.current);
+    }
+    flashBarTimerRef.current = window.setTimeout(() => {
+      flashBarTimerRef.current = null;
+      setFlashBarNumber(null);
+    }, 450);
+  }
+
+  const currentMidiBarNum = useMemo(() => {
+    if (!isMidiMode || midiScoreBars.length === 0) {
+      return midiSource?.songSettings.startBar ?? 1;
+    }
+    const passSec = Math.max(0, displaySec - activePassStart);
+    return (
+      findBarAtPassSec(midiScoreBars, passSec)?.barNumber ??
+      midiScoreBars[0]!.barNumber
+    );
+  }, [
+    isMidiMode,
+    midiScoreBars,
+    displaySec,
+    activePassStart,
+    midiSource?.songSettings.startBar,
+  ]);
+
+  function handleToggleLoopA() {
+    if (!isMidiMode || midiScoreBars.length === 0) return;
+    const minBar = midiScoreBars[0]!.barNumber;
+    const maxBar = midiScoreBars[midiScoreBars.length - 1]!.barNumber;
+    saveLoopBars(
+      toggleMidiLoopPoint(midiLoopBars, 'A', currentMidiBarNum, minBar, maxBar),
+    );
+  }
+
+  function handleToggleLoopB() {
+    if (!isMidiMode || midiScoreBars.length === 0) return;
+    const minBar = midiScoreBars[0]!.barNumber;
+    const maxBar = midiScoreBars[midiScoreBars.length - 1]!.barNumber;
+    saveLoopBars(
+      toggleMidiLoopPoint(midiLoopBars, 'B', currentMidiBarNum, minBar, maxBar),
+    );
+  }
+
+  function handleClearLoopAB() {
+    if (!isMidiMode) return;
+    saveLoopBars({});
+  }
+
+  function cancelScoreLongPressTimer() {
+    if (scoreLongPressTimerRef.current !== null) {
+      window.clearTimeout(scoreLongPressTimerRef.current);
+      scoreLongPressTimerRef.current = null;
+    }
+  }
+
+  function handleScorePointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    if (!isMidiMode || !exercise || midiScoreBars.length === 0) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+
+    const pt = toLocalPoint(e.clientX, e.clientY, rotationCtx);
+    const areaEl = scoreAreaRef.current;
+    let targetLine = renderedLines.find((l) => l.line.isCurrent) ?? renderedLines[0];
+    let relX = pt.x;
+    if (areaEl) {
+      const areaRect = toLocalRect(areaEl.getBoundingClientRect(), rotationCtx);
+      relX = pt.x - areaRect.left;
+      const relY = pt.y - areaRect.top;
+      if (renderedLines.length > 1) {
+        const lineIdx = Math.min(
+          renderedLines.length - 1,
+          Math.max(0, Math.floor(relY / Math.max(1, vpLayout.lineHeight))),
+        );
+        targetLine = renderedLines[lineIdx] ?? targetLine;
+      }
+    }
+
+    const hitSeg = targetLine?.midiData
+      ? findMidiSegmentAtX(relX, targetLine.midiData.segments)
+      : null;
+    const rateSegments =
+      (renderedLines.find((l) => l.line.isCurrent) ?? targetLine)?.midiData
+        ?.segments ?? [];
+    const secPerPx = computeMidiScrubSecPerPx(rateSegments, midiAvailWidth, 4);
+    const startSec = getExtrapolatedSec();
+    const pointerId = e.pointerId;
+
+    scoreGestureRef.current = {
+      pointerId,
+      startX: pt.x,
+      startY: pt.y,
+      startTime: performance.now(),
+      maxDist: 0,
+      mode: 'pending',
+      startSec,
+      secPerPx,
+      wasPlaying: playingRef.current,
+      targetBarNumber: hitSeg?.barNumber ?? null,
+      targetBarAbsStartSec: hitSeg
+        ? (hitSeg.beatAbsSecs[0] ?? hitSeg.absStartSec)
+        : null,
+    };
+
+    cancelScoreLongPressTimer();
+    if (hitSeg) {
+      const targetBarNum = hitSeg.barNumber;
+      const minBar = midiScoreBars[0]!.barNumber;
+      const maxBar = midiScoreBars[midiScoreBars.length - 1]!.barNumber;
+      scoreLongPressTimerRef.current = window.setTimeout(() => {
+        scoreLongPressTimerRef.current = null;
+        const g = scoreGestureRef.current;
+        if (!g || g.pointerId !== pointerId || g.mode !== 'pending') {
+          return;
+        }
+        g.mode = 'long-press';
+        const nextLoop = applyScoreBarLongPressLoop(
+          midiLoopBars,
+          targetBarNum,
+          minBar,
+          maxBar,
+        );
+        saveLoopBars(nextLoop);
+        triggerBarFlash(targetBarNum);
+      }, 500);
+    }
+  }
+
+  function handleScorePointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    const g = scoreGestureRef.current;
+    if (!g || g.pointerId !== e.pointerId || !exercise) return;
+    const pt = toLocalPoint(e.clientX, e.clientY, rotationCtx);
+    const dx = pt.x - g.startX;
+    const dy = pt.y - g.startY;
+    const dist = Math.hypot(dx, dy);
+    g.maxDist = Math.max(g.maxDist, dist);
+
+    if (g.maxDist >= 8) {
+      cancelScoreLongPressTimer();
+    }
+
+    if (g.mode === 'pending') {
+      if (Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy)) {
+        g.mode = 'drag';
+        isScrubbingRef.current = true;
+        try {
+          e.currentTarget.setPointerCapture(e.pointerId);
+        } catch {
+          // 忽略部分環境不支援 setPointerCapture
+        }
+        if (g.wasPlaying) {
+          engine.pause();
+        }
+        const preview = computeScrubTargetSec(
+          g.startSec,
+          dx,
+          g.secPerPx,
+          exercise.total,
+        );
+        scrubPreviewSecRef.current = preview;
+        setScrubPreviewSec(preview);
+      } else if (Math.abs(dy) > 8 && Math.abs(dy) >= Math.abs(dx)) {
+        g.mode = 'vertical';
+      }
+    } else if (g.mode === 'drag') {
+      const preview = computeScrubTargetSec(
+        g.startSec,
+        dx,
+        g.secPerPx,
+        exercise.total,
+      );
+      scrubPreviewSecRef.current = preview;
+      setScrubPreviewSec(preview);
+    }
+  }
+
+  function handleScorePointerUp(e: React.PointerEvent<HTMLDivElement>) {
+    cancelScoreLongPressTimer();
+    const g = scoreGestureRef.current;
+    if (!g || g.pointerId !== e.pointerId) return;
+    scoreGestureRef.current = null;
+
+    if (g.mode === 'long-press' || g.mode === 'vertical') {
+      return;
+    }
+    if (g.mode === 'drag') {
+      isScrubbingRef.current = false;
+      const rawTarget = scrubPreviewSecRef.current ?? g.startSec;
+      scrubPreviewSecRef.current = null;
+      setScrubPreviewSec(null);
+      if (exercise) {
+        const snapped = snapAbsSecToNearestBeat({
+          targetAbsSec: rawTarget,
+          totalSec: exercise.total,
+          scoreBars: midiScoreBars,
+          passWindows,
+        });
+        handleMidiSeek(
+          snapped,
+          g.wasPlaying ? { expectedPlaying: true, tolerance: 0.25 } : undefined,
+        );
+        if (g.wasPlaying) {
+          engine.play();
+        }
+      }
+      return;
+    }
+
+    // 點一下（移動距離 < 8px 且時間 < 300ms）：跳到被點小節的第一拍
+    const elapsed = performance.now() - g.startTime;
+    if (
+      g.mode === 'pending' &&
+      g.maxDist < 8 &&
+      elapsed < 300 &&
+      g.targetBarAbsStartSec !== null
+    ) {
+      handleMidiSeek(g.targetBarAbsStartSec);
+    }
+  }
+
+  function handleScorePointerCancel(e: React.PointerEvent<HTMLDivElement>) {
+    cancelScoreLongPressTimer();
+    const g = scoreGestureRef.current;
+    if (!g || g.pointerId !== e.pointerId) return;
+    scoreGestureRef.current = null;
+    if (g.mode === 'drag') {
+      isScrubbingRef.current = false;
+      scrubPreviewSecRef.current = null;
+      setScrubPreviewSec(null);
+      if (g.wasPlaying) {
+        pendingSeekGuardRef.current = {
+          targetSec: g.startSec,
+          expiresAt: performance.now() + 300,
+          expectedPlaying: true,
+          tolerance: 0.5,
+        };
+        engine.play();
+      }
+    }
+  }
 
   function handleDrawerPointerDown(e: React.PointerEvent<HTMLDivElement>) {
     e.preventDefault();
@@ -2891,7 +3359,7 @@ export function PracticePage({
           {showLyrics && passLyrics && (
             <LyricsStrip
               lines={passLyrics.lines}
-              passSec={Math.max(0, sec - activePassStart)}
+              passSec={Math.max(0, displaySec - activePassStart)}
               leadSec={settings.lyricsLeadSec}
               lyricsScale={settings.lyricsScale}
               twoLines={lyricsTwoLines}
@@ -2901,9 +3369,16 @@ export function PracticePage({
           )}
 
           <div
-            className="sheet-score-area"
+            className={`sheet-score-area ${isMidiMode ? 'is-midi' : ''} ${scrubPreviewSec !== null ? 'is-scrubbing' : ''}`}
             ref={scoreAreaRef}
             style={{ height: `${vpLayout.scoreAreaHeight}px` }}
+            onPointerDown={isMidiMode ? handleScorePointerDown : undefined}
+            onPointerMove={isMidiMode ? handleScorePointerMove : undefined}
+            onPointerUp={isMidiMode ? handleScorePointerUp : undefined}
+            onPointerCancel={isMidiMode ? handleScorePointerCancel : undefined}
+            onContextMenu={
+              isMidiMode ? (e) => e.preventDefault() : undefined
+            }
           >
             {renderedLines.map((item, lineIdx) => (
               <div
@@ -2934,7 +3409,7 @@ export function PracticePage({
                 <JianpuStrip
                   glyphs={item.glyphs}
                   activeIndex={item.activeNoteIdx}
-                  sec={item.line.isCurrent ? sec : -1}
+                  sec={item.line.isCurrent ? displaySec : -1}
                   activeKey={item.lineKey}
                   tonicMidi={item.lineTonicMidi}
                   jianpuMode={settings.jianpuMode}
@@ -2976,9 +3451,12 @@ export function PracticePage({
                   shadowResults={item.shadowResults}
                   isTablet={isTablet}
                   midiData={item.midiData}
-                  sec={item.line.isCurrent ? sec : undefined}
+                  sec={item.line.isCurrent ? displaySec : undefined}
                   introCountdownBars={item.introCountdownBars}
                   isCurrentLine={item.line.isCurrent}
+                  loopStartBar={isMidiMode ? midiLoopBars.loopStartBar : undefined}
+                  loopEndBar={isMidiMode ? midiLoopBars.loopEndBar : undefined}
+                  flashBarNumber={isMidiMode ? flashBarNumber : undefined}
                 />
               </div>
             ))}
@@ -3026,10 +3504,12 @@ export function PracticePage({
           endBar={midiSource.songSettings.endBar}
           activePassStart={activePassStart}
           totalPassDur={totalPassDur}
-          sec={sec}
+          sec={displaySec}
           passLyrics={showLyrics && passLyrics ? passLyrics.lines : []}
           isTablet={isTablet}
           height={seekBarHeight}
+          loopStartBar={midiLoopBars.loopStartBar}
+          loopEndBar={midiLoopBars.loopEndBar}
           onSeek={handleMidiSeek}
         />
       )}
@@ -3091,6 +3571,12 @@ export function PracticePage({
         showMixerButton={isMidiMode}
         mixerOpen={mixerOpen}
         onToggleMixer={() => setMixerOpen((v) => !v)}
+        showAbLoop={isMidiMode}
+        loopStartBar={midiLoopBars.loopStartBar}
+        loopEndBar={midiLoopBars.loopEndBar}
+        onToggleLoopA={handleToggleLoopA}
+        onToggleLoopB={handleToggleLoopB}
+        onClearLoopAB={handleClearLoopAB}
         onPrevKey={handlePrevKey}
         onPlayPause={handlePlayPause}
         onScreenshot={handleScreenshot}
@@ -3135,18 +3621,28 @@ export function PracticePage({
   );
 }
 
-function songSettingsEqualIgnoringMixer(
+function songSettingsEqualIgnoringMixerAndLoop(
   a: MidiPracticeSource['songSettings'],
   b: MidiPracticeSource['songSettings'],
 ): boolean {
   if (a === b) return true;
-  const { mixer: _ma, ...restA } = a;
-  const { mixer: _mb, ...restB } = b;
+  const {
+    mixer: _ma,
+    loopStartBar: _la,
+    loopEndBar: _lb,
+    ...restA
+  } = a;
+  const {
+    mixer: _mb,
+    loopStartBar: _lc,
+    loopEndBar: _ld,
+    ...restB
+  } = b;
   return JSON.stringify(restA) === JSON.stringify(restB);
 }
 
-/** 兩個 MIDI 練唱來源除了混音器設定外是否完全相同 */
-function isSameMidiSourceIgnoringMixer(
+/** 兩個 MIDI 練唱來源除了混音器與 A–B 循環設定外是否完全相同 */
+function isSameMidiSourceIgnoringMixerAndLoop(
   a: MidiPracticeSource,
   b: MidiPracticeSource,
 ): boolean {
@@ -3156,6 +3652,6 @@ function isSameMidiSourceIgnoringMixer(
     a.name === b.name &&
     a.asset === b.asset &&
     a.importedLyrics === b.importedLyrics &&
-    songSettingsEqualIgnoringMixer(a.songSettings, b.songSettings)
+    songSettingsEqualIgnoringMixerAndLoop(a.songSettings, b.songSettings)
   );
 }

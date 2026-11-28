@@ -349,6 +349,17 @@ export function MidiPage({
   function updateSongSettings(patch: Partial<MidiSongSettings>) {
     if (!activeItem || !songSettings) return;
     const next: MidiSongSettings = { ...songSettings, ...patch };
+    // 若換了起訖小節（startBar/endBar），舊 A–B 超出新區間時自動清除
+    const aOut =
+      next.loopStartBar !== undefined &&
+      (next.loopStartBar < next.startBar || next.loopStartBar > next.endBar);
+    const bOut =
+      next.loopEndBar !== undefined &&
+      (next.loopEndBar < next.startBar || next.loopEndBar > next.endBar);
+    if (aOut || bOut) {
+      delete next.loopStartBar;
+      delete next.loopEndBar;
+    }
     setSongSettings(next);
     saveMidiSongSettings(activeItem.hash, next);
   }

@@ -18,7 +18,11 @@ import {
   buildMidiMeasurePages,
   chooseBarsForLine,
   computeIntroCountdownBars,
+  computeMidiScrubSecPerPx,
+  computeScrubTargetSec,
+  findMidiSegmentAtX,
   midiLineTimeToX,
+  midiLineXToTime,
   midiMeasurePageIndexAtTime,
   midiMeasureScoreLines,
 } from '../practice/midiLayout';
@@ -500,6 +504,97 @@ describe('MIDI 小節制排版、拍點對應與簡譜／五線譜繪製', () =>
     expect(ltsWindows[0]!.start).toBeCloseTo(4.0, 6);
     expect(ltsWindows[1]!.phase).toBe('sing');
     expect(ltsWindows[1]!.start).toBeCloseTo(4.0 + passDur, 6);
+  });
+
+  it('midiLineXToTime、findMidiSegmentAtX、拖曳速度反推與 A–B 五線譜標記輸出', () => {
+    const asset = makeSixteenthRichMidiAsset(4);
+    const res = buildMidiExercise(asset, {
+      trackIndex: 0,
+      startBar: 1,
+      endBar: 4,
+      countIn: true,
+    });
+    const pages = buildMidiMeasurePages(res.exercise, res.scoreBars, 580);
+    const built = buildMidiLineGlyphs({
+      page: pages[0]!,
+      key: res.transposedKey,
+      clef: 'treble',
+      scoreWidth: 680,
+      lineSpacing: 12,
+      isFirstLineInPass: true,
+      isLastPageInPass: false,
+      passStartSec: 4.0,
+    });
+
+    // X <-> 時間互反
+    const targetSec = 6.5;
+    const x = midiLineTimeToX(
+      targetSec,
+      built.renderData.segments,
+      built.renderData.leftPad,
+      built.renderData.rightEdge,
+    );
+    expect(
+      midiLineXToTime(
+        x,
+        built.renderData.segments,
+        built.renderData.leftPad,
+        built.renderData.rightEdge,
+      ),
+    ).toBeCloseTo(targetSec, 4);
+
+    // findMidiSegmentAtX 正確分辨第一與第二小節
+    const seg0 = built.renderData.segments[0]!;
+    const seg1 = built.renderData.segments[1]!;
+    expect(findMidiSegmentAtX(seg0.contentStartX + 10, built.renderData.segments)?.barNumber).toBe(1);
+    expect(findMidiSegmentAtX(seg1.barStartX + 5, built.renderData.segments)?.barNumber).toBe(2);
+
+    // 拖過一整頁寬度（兩小節）約移動兩小節時間；向左拖(dx<0)往前進、向右拖(dx>0)往回退並夾在 0..total
+    const rate = computeMidiScrubSecPerPx(built.renderData.segments);
+    const pageWidth = seg1.endX - seg0.barStartX;
+    const pageDur = seg1.absEndSec - seg0.absStartSec;
+    expect(computeScrubTargetSec(4.0, -pageWidth, rate, res.exercise.total)).toBeCloseTo(
+      4.0 + pageDur,
+      3,
+    );
+    expect(computeScrubTargetSec(4.0, 2000, rate, res.exercise.total)).toBe(0);
+    expect(computeScrubTargetSec(4.0, -50000, rate, res.exercise.total)).toBe(
+      res.exercise.total,
+    );
+
+    // StaffView 繪製 A–B 半透明範圍、A/B 標記與長按閃爍框
+    const staffWithAb = renderToStaticMarkup(
+      createElement(StaffView, {
+        width: 680,
+        height: 140,
+        clef: 'treble',
+        activeKey: res.transposedKey,
+        window: {
+          keyIndex: 0,
+          pass: 0,
+          phase: 'sing',
+          start: pages[0]!.start,
+          end: pages[0]!.end,
+        },
+        glyphs: built.glyphs,
+        activeIndex: 0,
+        chords: [],
+        leftPad: built.renderData.leftPad,
+        metrics: { stepY: 6, lineSpacing: 12, baseY: 88, chordY: 12 },
+        sung: [],
+        countIn: { active: false, dots: [] },
+        isTablet: false,
+        midiData: built.renderData,
+        sec: 4.5,
+        loopStartBar: 1,
+        loopEndBar: 2,
+        flashBarNumber: 2,
+      }),
+    );
+    expect(staffWithAb).toContain('staff-ab-range');
+    expect(staffWithAb).toContain('staff-ab-badge is-a');
+    expect(staffWithAb).toContain('staff-ab-badge is-b');
+    expect(staffWithAb).toContain('staff-bar-flash');
   });
 });
 

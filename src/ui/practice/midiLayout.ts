@@ -325,6 +325,98 @@ export function midiLineTimeToX(
   return fallbackRight;
 }
 
+/** 依行內水平座標 X 找出對應的 MIDI 小節排版區段（以小節線為界） */
+export function findMidiSegmentAtX(
+  x: number,
+  segments: readonly MidiBarLayoutSegment[],
+): MidiBarLayoutSegment | null {
+  if (segments.length === 0) return null;
+  for (let i = 0; i < segments.length - 1; i++) {
+    const nextStart = segments[i + 1]!.barStartX;
+    if (x < nextStart) {
+      return segments[i]!;
+    }
+  }
+  return segments[segments.length - 1]!;
+}
+
+/** 將 MIDI 行內水平座標 X 反推為練習時間軸絕對秒數（midiLineTimeToX 的反函式） */
+export function midiLineXToTime(
+  x: number,
+  segments: readonly MidiBarLayoutSegment[],
+  fallbackLeft: number,
+  fallbackRight: number,
+  fallbackStartSec = 0,
+  fallbackEndSec = 0,
+): number {
+  if (segments.length === 0) {
+    if (fallbackRight <= fallbackLeft || fallbackEndSec <= fallbackStartSec) {
+      return fallbackStartSec;
+    }
+    const ratio = Math.max(
+      0,
+      Math.min(1, (x - fallbackLeft) / (fallbackRight - fallbackLeft)),
+    );
+    return fallbackStartSec + ratio * (fallbackEndSec - fallbackStartSec);
+  }
+  const first = segments[0]!;
+  const last = segments[segments.length - 1]!;
+  if (x <= first.contentStartX) {
+    return first.absStartSec;
+  }
+  if (x >= last.endX) {
+    return last.absEndSec;
+  }
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i]!;
+    if (x <= seg.contentStartX) {
+      return seg.absStartSec;
+    }
+    if (x <= seg.endX) {
+      const spanX = Math.max(1e-6, seg.endX - seg.contentStartX);
+      const ratio = (x - seg.contentStartX) / spanX;
+      return seg.absStartSec + ratio * (seg.absEndSec - seg.absStartSec);
+    }
+    const next = segments[i + 1];
+    if (next && x < next.contentStartX) {
+      return seg.absEndSec;
+    }
+  }
+  return last.absEndSec;
+}
+
+/** 依目前行的各小節寬度與時間計算每像素對應的秒數（拖過一小節寬 ≈ 移動一小節時間） */
+export function computeMidiScrubSecPerPx(
+  segments: readonly MidiBarLayoutSegment[],
+  fallbackSpanPx = 300,
+  fallbackDurSec = 4,
+): number {
+  if (segments.length === 0) {
+    return fallbackDurSec / Math.max(20, fallbackSpanPx);
+  }
+  const first = segments[0]!;
+  const last = segments[segments.length - 1]!;
+  const totalWidth = Math.max(20, last.endX - first.barStartX);
+  const totalDur = Math.max(0.05, last.absEndSec - first.absStartSec);
+  return totalDur / totalWidth;
+}
+
+/** 依拖曳水平位移 deltaX（向左為負＝歌曲往前進）計算夾限在 [0, totalSec] 的目標秒數 */
+export function computeScrubTargetSec(
+  startSec: number,
+  deltaX: number,
+  secPerPx: number,
+  totalSec: number,
+): number {
+  const safeTotal = Number.isFinite(totalSec) && totalSec > 0 ? totalSec : 0;
+  const safeStart = Number.isFinite(startSec) ? startSec : 0;
+  const safeDelta = Number.isFinite(deltaX) ? deltaX : 0;
+  const safeRate =
+    Number.isFinite(secPerPx) && secPerPx > 0 ? secPerPx : 0.01;
+  const raw = safeStart - safeDelta * safeRate;
+  return Math.max(0, Math.min(safeTotal, raw));
+}
+
 /** 計算單一 MIDI 樂譜行的完整繪製資料（小節線、拍號、拍點、音符／休止符、連結線、符槓、簡譜對齊點） */
 export function buildMidiLineGlyphs(params: {
   page: MidiMeasurePage;

@@ -7,6 +7,7 @@ import {
   findLyricPreviewAtPassSec,
   formatSeekTime,
   passSecToSeekRatio,
+  resolveMidiLoopRangeSec,
   seekRatioToPassSec,
   snapPassSecToNearestBeat,
 } from '../../core/midiSeek';
@@ -22,6 +23,8 @@ interface MidiSeekBarProps {
   passLyrics: readonly LyricLine[];
   isTablet: boolean;
   height: number;
+  loopStartBar?: number;
+  loopEndBar?: number;
   onSeek: (targetAbsSec: number) => void;
 }
 
@@ -36,6 +39,8 @@ export function MidiSeekBar({
   passLyrics,
   isTablet,
   height,
+  loopStartBar,
+  loopEndBar,
   onSeek,
 }: MidiSeekBarProps) {
   const trackRef = useRef<HTMLDivElement | null>(null);
@@ -70,6 +75,29 @@ export function MidiSeekBar({
 
   const lyricTicks = computeSeekLyricTicks(passLyrics, totalPassDur);
   const vocalStartInfo = computeVocalStartSeekInfo(scoreBars, totalPassDur);
+  const loopRange = resolveMidiLoopRangeSec(
+    scoreBars,
+    loopStartBar,
+    loopEndBar,
+  );
+  const loopStartBarObj =
+    loopStartBar !== undefined
+      ? scoreBars.find((b) => b.barNumber === loopStartBar)
+      : undefined;
+  const loopEndBarObj =
+    loopEndBar !== undefined
+      ? scoreBars.find((b) => b.barNumber === loopEndBar)
+      : undefined;
+  const abLeftRatio = loopRange
+    ? passSecToSeekRatio(loopRange.startPassSec, totalPassDur)
+    : loopStartBarObj
+      ? passSecToSeekRatio(loopStartBarObj.startSec, totalPassDur)
+      : null;
+  const abRightRatio = loopRange
+    ? passSecToSeekRatio(loopRange.endPassSec, totalPassDur)
+    : loopEndBarObj
+      ? passSecToSeekRatio(loopEndBarObj.endSec, totalPassDur)
+      : null;
 
   function jumpToVocalStart() {
     if (!vocalStartInfo) return;
@@ -190,10 +218,34 @@ export function MidiSeekBar({
         )}
 
         <div className="midi-seek-rail">
+          {loopRange && abLeftRatio !== null && abRightRatio !== null && (
+            <div
+              className="midi-seek-ab-range"
+              style={{
+                left: `${(abLeftRatio * 100).toFixed(2)}%`,
+                width: `${Math.max(0.5, (abRightRatio - abLeftRatio) * 100).toFixed(2)}%`,
+              }}
+              aria-hidden="true"
+            />
+          )}
           <div
             className="midi-seek-fill"
             style={{ width: `${(effectiveRatio * 100).toFixed(2)}%` }}
           />
+          {abLeftRatio !== null && (
+            <span
+              className="midi-seek-ab-mark is-a"
+              style={{ left: `${(abLeftRatio * 100).toFixed(2)}%` }}
+              aria-hidden="true"
+            />
+          )}
+          {abRightRatio !== null && (
+            <span
+              className="midi-seek-ab-mark is-b"
+              style={{ left: `${(abRightRatio * 100).toFixed(2)}%` }}
+              aria-hidden="true"
+            />
+          )}
           {lyricTicks.map((tickRatio, idx) => (
             <span
               key={`ltick-${idx}`}

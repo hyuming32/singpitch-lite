@@ -56,6 +56,12 @@ interface StaffViewProps {
   introCountdownBars?: number | null;
   /** 是否為目前正在播放的那一行 */
   isCurrentLine?: boolean;
+  /** A–B 循環起點小節號（1 起算） */
+  loopStartBar?: number;
+  /** A–B 循環終點小節號（1 起算） */
+  loopEndBar?: number;
+  /** 長按回饋閃爍的小節號 */
+  flashBarNumber?: number | null;
 }
 
 const STAFF_LINES = [0, 2, 4, 6, 8];
@@ -83,6 +89,9 @@ export function StaffView({
   sec,
   introCountdownBars,
   isCurrentLine = true,
+  loopStartBar,
+  loopEndBar,
+  flashBarNumber,
 }: StaffViewProps) {
   const safeWidth = Math.max(120, width);
   const safeHeight = Math.max(40, height);
@@ -183,6 +192,131 @@ export function StaffView({
       viewBox={`0 0 ${safeWidth} ${safeHeight}`}
       aria-label="五線譜"
     >
+      {/* MIDI A–B 循環範圍半透明色塊、長按閃爍與起終點標記 */}
+      {midiData &&
+        (() => {
+          const segs = midiData.segments;
+          const hasRange =
+            loopStartBar !== undefined && loopEndBar !== undefined;
+          const loBar = hasRange ? Math.min(loopStartBar, loopEndBar) : -1;
+          const hiBar = hasRange ? Math.max(loopStartBar, loopEndBar) : -1;
+          const topY = yForPos(8) - 2;
+          const staffSpanH = yForPos(0) - yForPos(8) + 4;
+          const badgeW = isTablet ? 15 : 12;
+          const badgeH = isTablet ? 15 : 12;
+          const badgeY = yForPos(8) - badgeH * 0.55;
+
+          return (
+            <g className="staff-ab-layer">
+              {segs.map((seg, bi) => {
+                const segEndX =
+                  bi < segs.length - 1
+                    ? segs[bi + 1]!.barStartX
+                    : rightEdge;
+                const segW = Math.max(1, segEndX - seg.barStartX);
+                const inRange =
+                  hasRange &&
+                  seg.barNumber >= loBar &&
+                  seg.barNumber <= hiBar;
+                const isFlashing =
+                  flashBarNumber !== undefined &&
+                  flashBarNumber !== null &&
+                  seg.barNumber === flashBarNumber;
+
+                return (
+                  <g key={`ab-seg-${seg.barNumber}`}>
+                    {inRange && (
+                      <rect
+                        className="staff-ab-range"
+                        x={seg.barStartX}
+                        y={topY}
+                        width={segW}
+                        height={staffSpanH}
+                        fill="rgba(245, 158, 11, 0.16)"
+                      />
+                    )}
+                    {isFlashing && (
+                      <rect
+                        className="staff-bar-flash"
+                        x={seg.barStartX}
+                        y={topY - 2}
+                        width={segW}
+                        height={staffSpanH + 4}
+                        rx={3}
+                      />
+                    )}
+                    {loopStartBar === seg.barNumber && (
+                      <g className="staff-ab-badge is-a" aria-label="A 起點">
+                        <line
+                          x1={seg.barStartX}
+                          y1={topY}
+                          x2={seg.barStartX}
+                          y2={topY + staffSpanH}
+                          stroke="#d97706"
+                          strokeWidth={2.5}
+                        />
+                        <rect
+                          x={Math.max(1, seg.barStartX - badgeW - 2)}
+                          y={badgeY}
+                          width={badgeW}
+                          height={badgeH}
+                          rx={3}
+                          fill="#d97706"
+                        />
+                        <text
+                          x={Math.max(1, seg.barStartX - badgeW - 2) + badgeW / 2}
+                          y={badgeY + badgeH / 2}
+                          textAnchor="middle"
+                          dominantBaseline="central"
+                          fontSize={isTablet ? 10 : 8.5}
+                          fontWeight="800"
+                          fill="#ffffff"
+                        >
+                          A
+                        </text>
+                      </g>
+                    )}
+                    {loopEndBar === seg.barNumber && (
+                      <g className="staff-ab-badge is-b" aria-label="B 終點">
+                        <line
+                          x1={segEndX}
+                          y1={topY}
+                          x2={segEndX}
+                          y2={topY + staffSpanH}
+                          stroke="#d97706"
+                          strokeWidth={2.5}
+                        />
+                        <rect
+                          x={Math.min(safeWidth - badgeW - 1, segEndX + 2)}
+                          y={badgeY}
+                          width={badgeW}
+                          height={badgeH}
+                          rx={3}
+                          fill="#d97706"
+                        />
+                        <text
+                          x={
+                            Math.min(safeWidth - badgeW - 1, segEndX + 2) +
+                            badgeW / 2
+                          }
+                          y={badgeY + badgeH / 2}
+                          textAnchor="middle"
+                          dominantBaseline="central"
+                          fontSize={isTablet ? 10 : 8.5}
+                          fontWeight="800"
+                          fill="#ffffff"
+                        >
+                          B
+                        </text>
+                      </g>
+                    )}
+                  </g>
+                );
+              })}
+            </g>
+          );
+        })()}
+
       {/* 五線譜線 */}
       {STAFF_LINES.map((pos) => {
         const y = yForPos(pos);

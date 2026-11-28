@@ -50,6 +50,12 @@ interface TransportBarProps {
   showMixerButton?: boolean;
   mixerOpen?: boolean;
   onToggleMixer?: () => void;
+  showAbLoop?: boolean;
+  loopStartBar?: number;
+  loopEndBar?: number;
+  onToggleLoopA?: () => void;
+  onToggleLoopB?: () => void;
+  onClearLoopAB?: () => void;
 }
 
 /** 格式化移調半音數：0 → "0"、正數加 "+"、負數加 "−" */
@@ -143,6 +149,12 @@ export function TransportBar({
   showMixerButton = false,
   mixerOpen = false,
   onToggleMixer,
+  showAbLoop = false,
+  loopStartBar,
+  loopEndBar,
+  onToggleLoopA,
+  onToggleLoopB,
+  onClearLoopAB,
 }: TransportBarProps) {
   const [showTransposeTip, setShowTransposeTip] = useState(false);
   const [showPianoHint, setShowPianoHint] = useState(() => !readPianoHintSeen());
@@ -461,6 +473,71 @@ export function TransportBar({
         >
           混音
         </button>
+      )}
+
+      {/* A–B 段落重複按鈕（僅 MIDI 模式顯示） */}
+      {showAbLoop && onToggleLoopA && onToggleLoopB && (
+        <div
+          className="tb-pill-group tb-ab-group"
+          role="group"
+          aria-label="A–B 段落重複"
+        >
+          <button
+            type="button"
+            className={`tb-btn tb-ab-btn ${loopStartBar !== undefined ? 'is-active' : ''}`}
+            aria-label={
+              loopStartBar !== undefined
+                ? `清除 A 起點（第 ${loopStartBar} 小節）`
+                : '設定 A 起點'
+            }
+            aria-pressed={loopStartBar !== undefined}
+            title={
+              loopStartBar !== undefined
+                ? `A：第 ${loopStartBar} 小節（再按一次清除）`
+                : '將目前小節設為 A 起點'
+            }
+            onClick={onToggleLoopA}
+          >
+            <span>A</span>
+            {loopStartBar !== undefined && (
+              <span className="tb-ab-bar">{loopStartBar}</span>
+            )}
+          </button>
+          <button
+            type="button"
+            className={`tb-btn tb-ab-btn ${loopEndBar !== undefined ? 'is-active' : ''}`}
+            aria-label={
+              loopEndBar !== undefined
+                ? `清除 B 終點（第 ${loopEndBar} 小節）`
+                : '設定 B 終點'
+            }
+            aria-pressed={loopEndBar !== undefined}
+            title={
+              loopEndBar !== undefined
+                ? `B：第 ${loopEndBar} 小節（再按一次清除）`
+                : '將目前小節設為 B 終點'
+            }
+            onClick={onToggleLoopB}
+          >
+            <span>B</span>
+            {loopEndBar !== undefined && (
+              <span className="tb-ab-bar">{loopEndBar}</span>
+            )}
+          </button>
+          {loopStartBar !== undefined &&
+            loopEndBar !== undefined &&
+            onClearLoopAB && (
+              <button
+                type="button"
+                className="tb-btn tb-ab-clear-btn"
+                aria-label="清除 A–B"
+                title="清除 A–B 重複"
+                onClick={onClearLoopAB}
+              >
+                清除
+              </button>
+            )}
+        </div>
       )}
 
       {/* 鋼琴指示燈開關 */}

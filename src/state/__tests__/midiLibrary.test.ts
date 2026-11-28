@@ -6,6 +6,7 @@ import {
   MemoryMidiStore,
   migrateMidiSongRange,
   resolveMidiMixer,
+  sanitizeMidiSongSettings,
   saveMidiSongSettings,
   stripMidiExtension,
   type MidiSongSettings,
@@ -199,5 +200,49 @@ describe('MIDI 每首設定存取（localStorage）', () => {
     const storage = createMemoryStorage();
     saveMidiSongSettings('abc12345', { ...base, regionUserSet: true }, storage);
     expect(loadMidiSongSettings('abc12345', storage)?.regionUserSet).toBe(true);
+  });
+
+  it('sanitizeMidiSongSettings 驗證 A–B 循環小節欄位（整數、在 startBar..endBar 內、B<A 自動對調、不合法丟棄）', () => {
+    const valid = sanitizeMidiSongSettings({
+      trackIndex: 0,
+      startBar: 4,
+      endBar: 12,
+      loopStartBar: 6,
+      loopEndBar: 10,
+    });
+    expect(valid?.loopStartBar).toBe(6);
+    expect(valid?.loopEndBar).toBe(10);
+
+    // B < A 自動對調
+    const swapped = sanitizeMidiSongSettings({
+      trackIndex: 0,
+      startBar: 4,
+      endBar: 12,
+      loopStartBar: 10,
+      loopEndBar: 5,
+    });
+    expect(swapped?.loopStartBar).toBe(5);
+    expect(swapped?.loopEndBar).toBe(10);
+
+    // 超出 startBar..endBar 或非整數時丟棄
+    const invalid = sanitizeMidiSongSettings({
+      trackIndex: 0,
+      startBar: 4,
+      endBar: 12,
+      loopStartBar: 2,
+      loopEndBar: 8.5,
+    });
+    expect(invalid?.loopStartBar).toBeUndefined();
+    expect(invalid?.loopEndBar).toBeUndefined();
+
+    // 只有 A 沒有 B 合法保留
+    const onlyA = sanitizeMidiSongSettings({
+      trackIndex: 0,
+      startBar: 4,
+      endBar: 12,
+      loopStartBar: 7,
+    });
+    expect(onlyA?.loopStartBar).toBe(7);
+    expect(onlyA?.loopEndBar).toBeUndefined();
   });
 });

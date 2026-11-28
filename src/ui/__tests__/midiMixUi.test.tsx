@@ -102,6 +102,8 @@ describe('TrackMixModal、MidiMixerPopover 與 PracticePage 混音 UI', () => {
       </AudioProvider>,
     );
     expect(scaleHtml).not.toContain('aria-label="混音"');
+    expect(scaleHtml).not.toContain('aria-label="A–B 段落重複"');
+    expect(scaleHtml).not.toContain('sheet-score-area is-midi');
 
     const midiHtml = renderToStaticMarkup(
       <AudioProvider>
@@ -122,6 +124,8 @@ describe('TrackMixModal、MidiMixerPopover 與 PracticePage 混音 UI', () => {
               manualKey: null,
               trackRoles: { 1: 'accompaniment', 2: 'vocal', 3: 'rhythm' },
               mixer: DEFAULT_MIDI_MIXER,
+              loopStartBar: 1,
+              loopEndBar: 1,
             },
           }}
           onBack={vi.fn()}
@@ -129,5 +133,9 @@ describe('TrackMixModal、MidiMixerPopover 與 PracticePage 混音 UI', () => {
       </AudioProvider>,
     );
     expect(midiHtml).toContain('aria-label="混音"');
+    expect(midiHtml).toContain('aria-label="A–B 段落重複"');
+    expect(midiHtml).toContain('aria-label="清除 A–B"');
+    expect(midiHtml).toContain('midi-seek-ab-range');
+    expect(midiHtml).toContain('sheet-score-area is-midi');
   });
 });

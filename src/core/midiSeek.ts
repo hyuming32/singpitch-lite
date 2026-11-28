@@ -161,3 +161,265 @@ export function computeSeekLyricTicks(
   }
   return ticks;
 }
+
+/** 將練習時間軸的絕對秒數對齊至所在遍內距離最近的一拍起點 */
+export function snapAbsSecToNearestBeat(params: {
+  targetAbsSec: number;
+  totalSec: number;
+  scoreBars: readonly MidiScoreBar[];
+  passWindows: readonly { start: number; end: number }[];
+}): number {
+  const { targetAbsSec, totalSec, scoreBars, passWindows } = params;
+  const safeTotal = Number.isFinite(totalSec) && totalSec > 0 ? totalSec : 0;
+  const clamped = Math.max(
+    0,
+    Math.min(safeTotal, Number.isFinite(targetAbsSec) ? targetAbsSec : 0),
+  );
+  if (passWindows.length === 0) {
+    return Math.max(
+      0,
+      Math.min(safeTotal, snapPassSecToNearestBeat(scoreBars, clamped)),
+    );
+  }
+
+  const firstWin = passWindows[0]!;
+  if (clamped < firstWin.start) {
+    return clamped < firstWin.start * 0.5 ? 0 : firstWin.start;
+  }
+
+  let activeWin = passWindows[passWindows.length - 1]!;
+  for (const w of passWindows) {
+    if (clamped >= w.start && clamped < w.end) {
+      activeWin = w;
+      break;
+    }
+  }
+
+  const snappedPass = snapPassSecToNearestBeat(
+    scoreBars,
+    clamped - activeWin.start,
+  );
+  return Math.max(0, Math.min(safeTotal, activeWin.start + snappedPass));
+}
+
+export interface MidiLoopBars {
+  loopStartBar?: number;
+  loopEndBar?: number;
+}
+
+export interface MidiLoopRangeSec {
+  /** A 點小節號（1 起算） */
+  startBar: number;
+  /** B 點小節號（1 起算，必 >= startBar） */
+  endBar: number;
+  /** A 點起點相對於單遍開頭的秒數 */
+  startPassSec: number;
+  /** B 點結束相對於單遍開頭的秒數 */
+  endPassSec: number;
+}
+
+/** 正規化 A–B 小節號：捨棄非整數與超出範圍者，若 B < A 則自動對調 */
+export function normalizeMidiLoopBars(
+  loopStartBar: number | undefined,
+  loopEndBar: number | undefined,
+  minBar: number,
+  maxBar: number,
+): MidiLoopBars {
+  const safeMin = Math.max(1, Math.round(minBar));
+  const safeMax = Math.max(safeMin, Math.round(maxBar));
+  const valid = (v: number | undefined): number | undefined =>
+    typeof v === 'number' &&
+    Number.isFinite(v) &&
+    Number.isInteger(v) &&
+    v >= safeMin &&
+    v <= safeMax
+      ? v
+      : undefined;
+
+  let a = valid(loopStartBar);
+  let b = valid(loopEndBar);
+  if (a !== undefined && b !== undefined && b < a) {
+    [a, b] = [b, a];
+  }
+  return {
+    ...(a !== undefined ? { loopStartBar: a } : {}),
+    ...(b !== undefined ? { loopEndBar: b } : {}),
+  };
+}
+
+/** 播放列 A／B 按鈕切換邏輯：未設時設為目前小節（若 B < A 自動對調），已設時再按一次清除 */
+export function toggleMidiLoopPoint(
+  current: MidiLoopBars,
+  point: 'A' | 'B',
+  currentBar: number,
+  minBar: number,
+  maxBar: number,
+): MidiLoopBars {
+  const norm = normalizeMidiLoopBars(
+    current.loopStartBar,
+    current.loopEndBar,
+    minBar,
+    maxBar,
+  );
+  const safeMin = Math.max(1, Math.round(minBar));
+  const safeMax = Math.max(safeMin, Math.round(maxBar));
+  const clampedBar = Math.max(
+    safeMin,
+    Math.min(safeMax, Math.round(currentBar)),
+  );
+
+  if (point === 'A') {
+    if (norm.loopStartBar !== undefined) {
+      return normalizeMidiLoopBars(undefined, norm.loopEndBar, minBar, maxBar);
+    }
+    return normalizeMidiLoopBars(clampedBar, norm.loopEndBar, minBar, maxBar);
+  }
+
+  if (norm.loopEndBar !== undefined) {
+    return normalizeMidiLoopBars(norm.loopStartBar, undefined, minBar, maxBar);
+  }
+  return normalizeMidiLoopBars(norm.loopStartBar, clampedBar, minBar, maxBar);
+}
+
+/** 譜面長按小節設定 A–B：無 A→設 A；有 A 無 B→設 B（自動對調）；兩者都有→重設 A 並清 B */
+export function applyScoreBarLongPressLoop(
+  current: MidiLoopBars,
+  barNumber: number,
+  minBar: number,
+  maxBar: number,
+): MidiLoopBars {
+  const norm = normalizeMidiLoopBars(
+    current.loopStartBar,
+    current.loopEndBar,
+    minBar,
+    maxBar,
+  );
+  const safeMin = Math.max(1, Math.round(minBar));
+  const safeMax = Math.max(safeMin, Math.round(maxBar));
+  const clampedBar = Math.max(
+    safeMin,
+    Math.min(safeMax, Math.round(barNumber)),
+  );
+
+  if (norm.loopStartBar !== undefined && norm.loopEndBar !== undefined) {
+    return { loopStartBar: clampedBar };
+  }
+  if (norm.loopStartBar === undefined && norm.loopEndBar === undefined) {
+    return { loopStartBar: clampedBar };
+  }
+  if (norm.loopStartBar !== undefined) {
+    return normalizeMidiLoopBars(norm.loopStartBar, clampedBar, minBar, maxBar);
+  }
+  return normalizeMidiLoopBars(clampedBar, norm.loopEndBar, minBar, maxBar);
+}
+
+/** 將 A–B 小節號對照 scoreBars 解析為單遍相對起訖秒數（僅 A、B 皆有效時回傳） */
+export function resolveMidiLoopRangeSec(
+  scoreBars: readonly MidiScoreBar[],
+  loopStartBar?: number,
+  loopEndBar?: number,
+): MidiLoopRangeSec | null {
+  if (
+    scoreBars.length === 0 ||
+    loopStartBar === undefined ||
+    loopEndBar === undefined
+  ) {
+    return null;
+  }
+  const minBar = scoreBars[0]!.barNumber;
+  const maxBar = scoreBars[scoreBars.length - 1]!.barNumber;
+  const norm = normalizeMidiLoopBars(loopStartBar, loopEndBar, minBar, maxBar);
+  if (norm.loopStartBar === undefined || norm.loopEndBar === undefined) {
+    return null;
+  }
+  const startBarObj = scoreBars.find((b) => b.barNumber === norm.loopStartBar);
+  const endBarObj = scoreBars.find((b) => b.barNumber === norm.loopEndBar);
+  if (!startBarObj || !endBarObj) {
+    return null;
+  }
+  const startPassSec = startBarObj.startSec;
+  const endPassSec = endBarObj.endSec;
+  if (endPassSec <= startPassSec) {
+    return null;
+  }
+  return {
+    startBar: startBarObj.barNumber,
+    endBar: endBarObj.barNumber,
+    startPassSec,
+    endPassSec,
+  };
+}
+
+/** 決定 A–B 檢查應歸屬哪一個 pass（優先使用 prevSec 所在 pass，避免跨過最後一小節時漏判） */
+export function findPassWindowForLoopCheck<
+  T extends { start: number; end: number },
+>(passWindows: readonly T[], prevSec: number, sec: number): T | null {
+  if (passWindows.length === 0) return null;
+  for (const w of passWindows) {
+    if (prevSec >= w.start && prevSec < w.end) {
+      return w;
+    }
+  }
+  for (const w of passWindows) {
+    if (sec >= w.start && sec < w.end) {
+      return w;
+    }
+  }
+  if (sec < passWindows[0]!.start) {
+    return passWindows[0]!;
+  }
+  return passWindows[passWindows.length - 1]!;
+}
+
+export interface LoopBackCheckParams {
+  /** 目前播放絕對秒數 */
+  sec: number;
+  /** 上一次位置或手動 seek 設定的絕對秒數 */
+  prevSec: number;
+  /** A–B 單遍秒數範圍 */
+  loopRange: MidiLoopRangeSec;
+  /** 目前所在遍的起始絕對秒數 */
+  passStartSec: number;
+  /** 提前觸發秒數（預設 0.03s ≈ 30ms，避免聽到 B 之後的音） */
+  leadSec?: number;
+}
+
+export interface LoopBackDecision {
+  shouldLoop: boolean;
+  targetAbsSec: number;
+}
+
+/**
+ * 判斷播放位置是否抵達 B 結束點而應跳回 A 起點：
+ * - 從 A 之前開始播時，正常播進 A–B 並在跨越 B 結束前（提前 leadSec）跳回 A
+ * - 手動 seek 到 B 之後時，prevSec >= triggerSec，不強制拉回，直到進入下一遍或手動回到範圍
+ */
+export function shouldLoopBack(params: LoopBackCheckParams): LoopBackDecision {
+  const { sec, prevSec, loopRange, passStartSec, leadSec = 0.03 } = params;
+  const absStart = passStartSec + loopRange.startPassSec;
+  const absEnd = passStartSec + loopRange.endPassSec;
+  if (
+    !Number.isFinite(sec) ||
+    !Number.isFinite(prevSec) ||
+    !Number.isFinite(absStart) ||
+    !Number.isFinite(absEnd) ||
+    absEnd <= absStart
+  ) {
+    return { shouldLoop: false, targetAbsSec: absStart };
+  }
+
+  const effectiveLead = Math.min(
+    Math.max(0, leadSec),
+    (absEnd - absStart) * 0.25,
+  );
+  const triggerSec = absEnd - effectiveLead;
+  const shouldLoop =
+    prevSec < triggerSec &&
+    sec >= triggerSec &&
+    sec <= absEnd + 0.5;
+
+  return {
+    shouldLoop,
+    targetAbsSec: absStart,
+  };
+}

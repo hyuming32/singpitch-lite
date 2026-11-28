@@ -59,6 +59,10 @@ export interface MidiSongSettings {
   lyricsOffsetSec?: number;
   /** 使用者是否曾主動修改過 A–B 區間（舊資料遷移用） */
   regionUserSet?: boolean;
+  /** 譜內 A–B 重複起點小節號（1 起算，須在 startBar..endBar 內） */
+  loopStartBar?: number;
+  /** 譜內 A–B 重複終點小節號（1 起算，須在 startBar..endBar 內） */
+  loopEndBar?: number;
 }
 
 /** 計算位元組陣列的 FNV-1a 32 位元十六進位雜湊值 */
@@ -363,6 +367,24 @@ export function resolveMidiLyricsOffset(
   return settings?.lyricsOffsetSec ?? 0;
 }
 
+function sanitizeLoopBar(
+  value: unknown,
+  startBar: number,
+  endBar: number,
+): number | undefined {
+  if (
+    typeof value !== 'number' ||
+    !Number.isFinite(value) ||
+    !Number.isInteger(value)
+  ) {
+    return undefined;
+  }
+  if (value < startBar || value > endBar) {
+    return undefined;
+  }
+  return value;
+}
+
 /** 驗證並正規化單首 MIDI 設定 */
 export function sanitizeMidiSongSettings(raw: unknown): MidiSongSettings | null {
   if (!raw || typeof raw !== 'object') {
@@ -398,6 +420,16 @@ export function sanitizeMidiSongSettings(raw: unknown): MidiSongSettings | null 
   const regionUserSet =
     typeof obj.regionUserSet === 'boolean' ? obj.regionUserSet : undefined;
 
+  let loopStartBar = sanitizeLoopBar(obj.loopStartBar, startBar, endBar);
+  let loopEndBar = sanitizeLoopBar(obj.loopEndBar, startBar, endBar);
+  if (
+    loopStartBar !== undefined &&
+    loopEndBar !== undefined &&
+    loopEndBar < loopStartBar
+  ) {
+    [loopStartBar, loopEndBar] = [loopEndBar, loopStartBar];
+  }
+
   return {
     trackIndex,
     startBar,
@@ -409,6 +441,8 @@ export function sanitizeMidiSongSettings(raw: unknown): MidiSongSettings | null 
     ...(mixer ? { mixer } : {}),
     ...(lyricsOffsetSec !== undefined ? { lyricsOffsetSec } : {}),
     ...(regionUserSet !== undefined ? { regionUserSet } : {}),
+    ...(loopStartBar !== undefined ? { loopStartBar } : {}),
+    ...(loopEndBar !== undefined ? { loopEndBar } : {}),
   };
 }
 

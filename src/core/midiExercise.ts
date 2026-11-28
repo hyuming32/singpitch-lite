@@ -1,6 +1,7 @@
 import type {
   ClickEvent,
   Exercise,
+  ExercisePassWindow,
   KeyBlock,
   NoteEvent,
 } from './exercise';
@@ -295,42 +296,33 @@ export function computeMidiBars(asset: MidiAsset): MidiBarInfo[] {
   return bars;
 }
 
-/** 計算指定音軌的預設練習小節區間（從第一個有音的小節到最後一個有音的小節，略過前奏與尾奏空白） */
-export function defaultBarRangeForTrack(
+/** 找出指定音軌第一個有效音符所在的小節編號（1 起算）；無有效音符時回傳 null */
+export function vocalStartBarForTrack(
   track: MidiTrack,
   bars: readonly MidiBarInfo[],
-): { startBar: number; endBar: number; skippedIntroBars: number } {
-  const maxBar = Math.max(1, bars.length);
+): number | null {
   const validNotes = track.notes.filter((n) => n.end > n.start + EPS);
   if (validNotes.length === 0 || bars.length === 0) {
-    return { startBar: 1, endBar: maxBar, skippedIntroBars: 0 };
+    return null;
   }
 
   let firstStart = Infinity;
-  let lastEnd = -Infinity;
   for (const n of validNotes) {
     if (n.start < firstStart) firstStart = n.start;
-    if (n.end > lastEnd) lastEnd = n.end;
   }
 
   const firstBar =
     bars.find((b) => firstStart < b.end - 1e-4) ?? bars[0]!;
-  let lastBar = bars[bars.length - 1]!;
-  for (let i = bars.length - 1; i >= 0; i--) {
-    const b = bars[i]!;
-    if (lastEnd > b.start + 1e-4) {
-      lastBar = b;
-      break;
-    }
-  }
+  return Math.max(1, Math.min(bars.length, firstBar.barNumber));
+}
 
-  const startBar = Math.max(1, Math.min(maxBar, firstBar.barNumber));
-  const endBar = Math.max(startBar, Math.min(maxBar, lastBar.barNumber));
-  return {
-    startBar,
-    endBar,
-    skippedIntroBars: Math.max(0, startBar - 1),
-  };
+/** 計算指定音軌的預設練習小節區間（預設第 1 小節到最後一小節，整首含前奏） */
+export function defaultBarRangeForTrack(
+  _track: MidiTrack,
+  bars: readonly MidiBarInfo[],
+): { startBar: number; endBar: number; skippedIntroBars: number } {
+  const maxBar = Math.max(1, bars.length);
+  return { startBar: 1, endBar: maxBar, skippedIntroBars: 0 };
 }
 
 /** 切出 A–B 小節區間內的單音旋律音符，並將時間歸零（未縮放速度） */
@@ -549,11 +541,13 @@ export function buildMidiExercise(
     midi: n.midi + transposeSemitones + displayTranspose,
   }));
 
+  const passWindows: ExercisePassWindow[] = [];
   const emitPass = (pass: number, phase: 'listen' | 'sing') => {
+    const passStart = tCursor;
     for (const n of shiftedNotes) {
       const dur = Math.max(MIN_NOTE_DUR, (n.end - n.start) / speedFactor);
       notes.push({
-        start: tCursor + n.start / speedFactor,
+        start: passStart + n.start / speedFactor,
         dur,
         midi: n.midi,
         keyIndex: 0,
@@ -563,6 +557,13 @@ export function buildMidiExercise(
       });
     }
     tCursor += passDur;
+    passWindows.push({
+      keyIndex: 0,
+      pass,
+      phase,
+      start: passStart,
+      end: Math.max(tCursor, passStart + 0.01),
+    });
   };
 
   if (mode === 'listen-then-sing') {
@@ -599,6 +600,7 @@ export function buildMidiExercise(
       chords: [],
       clicks,
       total: tCursor,
+      passWindows,
     },
     baseBpm,
     effectiveBpm,

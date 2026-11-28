@@ -129,6 +129,17 @@ export function sourceToKey(source: PracticeLogSource): string {
 
 /** 從 Exercise 擷取所有唱段（phase === 'sing'）的起訖秒數 */
 export function extractSingPassSpans(ex: Exercise): SingPassSpan[] {
+  if (ex.passWindows && ex.passWindows.length > 0) {
+    return ex.passWindows
+      .filter((w) => w.phase === 'sing')
+      .map((w) => ({
+        keyIndex: w.keyIndex,
+        pass: w.pass,
+        start: w.start,
+        end: w.end,
+      }))
+      .sort((a, b) => a.start - b.start);
+  }
   const map = new Map<string, SingPassSpan>();
   for (const n of ex.notes) {
     if (n.phase !== 'sing') continue;

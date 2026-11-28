@@ -6,10 +6,12 @@ import type { MidiAsset, MidiNote } from '../../core/midi';
 import { buildMidiExercise, computeMidiBars } from '../../core/midiExercise';
 import {
   buildMidiScorePages,
+  listPassWindows,
   midiMaxNotesPerPage,
   midiPageIndexAtTime,
   midiScoreLines,
 } from '../practice/layout';
+import { findBarAtPassSec } from '../../core/midiSeek';
 import { JianpuStrip } from '../practice/JianpuStrip';
 import {
   buildMidiLineGlyphs,
@@ -423,6 +425,81 @@ describe('MIDI 小節制排版、拍點對應與簡譜／五線譜繪製', () =>
     }
     expect(jianpuHtml).toContain('jianpu-connected-underline');
     expect(jianpuHtml).not.toContain('jianpu-strip-solfege');
+  });
+
+  it('區間第一小節開頭有休止時，pass 視窗、分頁、歌詞／拉桿 passSec 與多遍起點皆對齊小節起點', () => {
+    // 4/4 拍、60 BPM（每拍 1 秒、每小節 4 秒），2 小節，第 1 小節前 2 拍休止（音符從 2.0s 開始）
+    const notes: MidiNote[] = [
+      { start: 2.0, end: 3.0, midi: 60, velocity: 90, track: 0, startTick: 240, endTick: 360 },
+      { start: 3.0, end: 4.0, midi: 62, velocity: 90, track: 0, startTick: 360, endTick: 480 },
+      { start: 4.0, end: 6.0, midi: 64, velocity: 90, track: 0, startTick: 480, endTick: 720 },
+    ];
+    const asset: MidiAsset = {
+      tracks: [{ index: 0, name: 'Vocal', notes }],
+      duration: 8.0,
+      ticksPerBeat: 120,
+      beats: [
+        [0, 0, 60],
+        [1, 1, 60],
+        [2, 2, 60],
+        [3, 3, 60],
+        [4, 0, 60],
+        [5, 1, 60],
+        [6, 2, 60],
+        [7, 3, 60],
+      ],
+    };
+
+    const res = buildMidiExercise(asset, {
+      trackIndex: 0,
+      startBar: 1,
+      endBar: 2,
+      countIn: true,
+    });
+    const windows = listPassWindows(res.exercise);
+    expect(windows).toHaveLength(1);
+    expect(windows[0]!.start).toBeCloseTo(4.0, 6);
+
+    const pages = buildMidiMeasurePages(res.exercise, res.scoreBars, 580);
+    expect(pages.length).toBeGreaterThan(0);
+    expect(pages[0]!.start).toBeCloseTo(4.0, 6);
+
+    // sec = 6.0 時，歌詞與進度拉桿使用的 passSec = 6.0 - 4.0 = 2.0
+    const passSecAt6 = 6.0 - windows[0]!.start;
+    expect(passSecAt6).toBeCloseTo(2.0, 6);
+    expect(findBarAtPassSec(res.scoreBars, passSecAt6)?.barNumber).toBe(1);
+
+    const passDur = 8.0;
+
+    // repeats = 2：第二遍視窗 start = 4.0 + passDur
+    const repeatRes = buildMidiExercise(asset, {
+      trackIndex: 0,
+      startBar: 1,
+      endBar: 2,
+      countIn: true,
+      repeats: 2,
+      mode: 'follow',
+    });
+    const repeatWindows = listPassWindows(repeatRes.exercise);
+    expect(repeatWindows).toHaveLength(2);
+    expect(repeatWindows[0]!.start).toBeCloseTo(4.0, 6);
+    expect(repeatWindows[1]!.start).toBeCloseTo(4.0 + passDur, 6);
+
+    // listen-then-sing：示範遍 start = 4.0，演唱遍 start = 4.0 + passDur
+    const ltsRes = buildMidiExercise(asset, {
+      trackIndex: 0,
+      startBar: 1,
+      endBar: 2,
+      countIn: true,
+      repeats: 1,
+      mode: 'listen-then-sing',
+    });
+    const ltsWindows = listPassWindows(ltsRes.exercise);
+    expect(ltsWindows).toHaveLength(2);
+    expect(ltsWindows[0]!.phase).toBe('listen');
+    expect(ltsWindows[0]!.start).toBeCloseTo(4.0, 6);
+    expect(ltsWindows[1]!.phase).toBe('sing');
+    expect(ltsWindows[1]!.start).toBeCloseTo(4.0 + passDur, 6);
   });
 });
 

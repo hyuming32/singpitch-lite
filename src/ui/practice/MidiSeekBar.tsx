@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import type { LyricLine } from '../../core/lyrics';
 import {
   computeSeekLyricTicks,
+  computeVocalStartSeekInfo,
   findBarAtPassSec,
   findLyricPreviewAtPassSec,
   formatSeekTime,
@@ -68,6 +69,12 @@ export function MidiSeekBar({
       : '';
 
   const lyricTicks = computeSeekLyricTicks(passLyrics, totalPassDur);
+  const vocalStartInfo = computeVocalStartSeekInfo(scoreBars, totalPassDur);
+
+  function jumpToVocalStart() {
+    if (!vocalStartInfo) return;
+    onSeek(activePassStart + vocalStartInfo.barStartPassSec);
+  }
 
   function computeRatioFromClientX(clientX: number): number {
     const el = trackRef.current;
@@ -195,6 +202,23 @@ export function MidiSeekBar({
               aria-hidden="true"
             />
           ))}
+          {vocalStartInfo && (
+            <button
+              type="button"
+              className="midi-seek-vocal-marker"
+              style={{ left: `${(vocalStartInfo.ratio * 100).toFixed(2)}%` }}
+              aria-label={`跳至人聲第 ${vocalStartInfo.barNumber} 小節`}
+              title={`跳至第 ${vocalStartInfo.barNumber} 小節開頭`}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                jumpToVocalStart();
+              }}
+            >
+              <span className="midi-seek-vocal-flag" aria-hidden="true" />
+              <span className="midi-seek-vocal-tag">人聲</span>
+            </button>
+          )}
         </div>
 
         <div
@@ -207,6 +231,17 @@ export function MidiSeekBar({
       <span className="midi-seek-time-label">
         {formatSeekTime(displayPassSec)} / {formatSeekTime(totalPassDur)}
       </span>
+
+      {vocalStartInfo && (
+        <button
+          type="button"
+          className="midi-seek-vocal-jump"
+          onClick={jumpToVocalStart}
+          title={`跳至第 ${vocalStartInfo.barNumber} 小節開頭`}
+        >
+          人聲：第 {vocalStartInfo.barNumber} 小節
+        </button>
+      )}
     </div>
   );
 }

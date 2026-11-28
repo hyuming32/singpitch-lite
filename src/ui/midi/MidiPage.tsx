@@ -15,6 +15,7 @@ import {
   detectMelodyKey,
   sliceMelodyByBars,
   transposeKey,
+  vocalStartBarForTrack,
 } from '../../core/midiExercise';
 import {
   autoAssignTrackRoles,
@@ -40,6 +41,7 @@ import {
   MIDI_LYRICS_OFFSET_MAX,
   MIDI_LYRICS_OFFSET_MIN,
   MIDI_LYRICS_OFFSET_STEP,
+  migrateMidiSongRange,
   resolveMidiLyricsOffset,
   resolveMidiMixer,
   saveMidiSongSettings,
@@ -123,6 +125,23 @@ function formatImportDate(iso: string): string {
   const hh = String(d.getHours()).padStart(2, '0');
   const mm = String(d.getMinutes()).padStart(2, '0');
   return `${y}/${m}/${day} ${hh}:${mm}`;
+}
+
+function loadAndMigrateSongSettings(
+  hash: string,
+  asset: MidiAsset,
+): MidiSongSettings | null {
+  const saved = loadMidiSongSettings(hash);
+  if (!saved) return null;
+  const bars = computeMidiBars(asset);
+  const track =
+    asset.tracks.find((t) => t.index === saved.trackIndex) ?? asset.tracks[0];
+  const legacyVocalBar = track ? vocalStartBarForTrack(track, bars) : null;
+  const migrated = migrateMidiSongRange(saved, legacyVocalBar);
+  if (migrated.changed) {
+    saveMidiSongSettings(hash, migrated.settings);
+  }
+  return migrated.settings;
 }
 
 function defaultSongSettings(asset: MidiAsset): MidiSongSettings {
@@ -356,7 +375,7 @@ export function MidiPage({
       const updatedList = await store.list();
       setLibrary(updatedList);
 
-      const saved = loadMidiSongSettings(hash);
+      const saved = loadAndMigrateSongSettings(hash, asset);
       const isNewMixSetup = !saved?.trackRoles;
       const initial = saved ?? defaultSongSettings(asset);
       const maxBar = Math.max(1, computeMidiBars(asset).length);
@@ -409,7 +428,7 @@ export function MidiPage({
         return;
       }
       const asset = parseMidi(entry.bytes);
-      const saved = loadMidiSongSettings(entry.hash);
+      const saved = loadAndMigrateSongSettings(entry.hash, asset);
       const initial = saved ?? defaultSongSettings(asset);
       const savedLyrics = await lyricsStore.get(entry.id).catch(() => null);
       setLyricsError(null);
@@ -447,7 +466,7 @@ export function MidiPage({
       songSettings.trackIndex;
     let nextStart = songSettings.startBar;
     let nextEnd = songSettings.endBar;
-    if (nextVocalIdx !== songSettings.trackIndex) {
+    if (nextVocalIdx !== songSettings.trackIndex && !songSettings.regionUserSet) {
       const nextTrack = activeItem.asset.tracks.find(
         (t) => t.index === nextVocalIdx,
       );
@@ -715,7 +734,7 @@ export function MidiPage({
                     nextTrackIndex,
                     'vocal',
                   );
-                  if (nextTrack) {
+                  if (nextTrack && !songSettings.regionUserSet) {
                     const range = defaultBarRangeForTrack(nextTrack, bars);
                     updateSongSettings({
                       trackIndex: nextTrackIndex,
@@ -753,79 +772,108 @@ export function MidiPage({
             </div>
 
             {/* 2. A–B 小節區間 */}
-            <div className="setting-row setting-row-stack">
-              <div className="setting-row-inline-head">
-                <span className="setting-label">A–B 小節區間</span>
-                <div className="midi-range-head-actions">
-                  {songSettings.startBar > 1 && (
-                    <span className="setting-value-badge">
-                      已略過前奏 {songSettings.startBar - 1} 小節
-                    </span>
-                  )}
-                  {(songSettings.startBar !== 1 ||
-                    songSettings.endBar !== bars.length) && (
-                    <button
-                      type="button"
-                      className="midi-inline-link"
-                      onClick={() =>
-                        updateSongSettings({
-                          startBar: 1,
-                          endBar: Math.max(1, bars.length),
-                        })
-                      }
-                    >
-                      重設整首
-                    </button>
-                  )}
+            {(() => {
+              const vocalStartBar = activeTrack
+                ? vocalStartBarForTrack(activeTrack, bars)
+                : null;
+              return (
+                <div className="setting-row setting-row-stack">
+                  <div className="setting-row-inline-head">
+                    <span className="setting-label">A–B 小節區間</span>
+                    <div className="midi-range-head-actions">
+                      {vocalStartBar !== null && (
+                        <>
+                          <span className="setting-value-badge">
+                            人聲從第 {vocalStartBar} 小節開始
+                          </span>
+                          <button
+                            type="button"
+                            className="midi-inline-link"
+                            disabled={songSettings.startBar === vocalStartBar}
+                            onClick={() =>
+                              updateSongSettings({
+                                startBar: vocalStartBar,
+                                endBar: Math.max(
+                                  vocalStartBar,
+                                  songSettings.endBar,
+                                ),
+                                regionUserSet: true,
+                              })
+                            }
+                          >
+                            從人聲開始
+                          </button>
+                        </>
+                      )}
+                      {(songSettings.startBar !== 1 ||
+                        songSettings.endBar !== bars.length) && (
+                        <button
+                          type="button"
+                          className="midi-inline-link"
+                          onClick={() =>
+                            updateSongSettings({
+                              startBar: 1,
+                              endBar: Math.max(1, bars.length),
+                              regionUserSet: true,
+                            })
+                          }
+                        >
+                          重設整首
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="midi-bar-range">
+                    <label className="midi-bar-field">
+                      <span>起</span>
+                      <select
+                        className="midi-select"
+                        aria-label="起始小節"
+                        value={songSettings.startBar}
+                        onChange={(e) => {
+                          const nextStart = Number(e.target.value);
+                          updateSongSettings({
+                            startBar: nextStart,
+                            endBar: Math.max(nextStart, songSettings.endBar),
+                            regionUserSet: true,
+                          });
+                        }}
+                      >
+                        {bars.map((b) => (
+                          <option key={b.barNumber} value={b.barNumber}>
+                            第 {b.barNumber} 小節
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <span className="midi-bar-sep">–</span>
+                    <label className="midi-bar-field">
+                      <span>訖</span>
+                      <select
+                        className="midi-select"
+                        aria-label="結束小節"
+                        value={songSettings.endBar}
+                        onChange={(e) => {
+                          const nextEnd = Number(e.target.value);
+                          updateSongSettings({
+                            endBar: Math.max(songSettings.startBar, nextEnd),
+                            regionUserSet: true,
+                          });
+                        }}
+                      >
+                        {bars
+                          .filter((b) => b.barNumber >= songSettings.startBar)
+                          .map((b) => (
+                            <option key={b.barNumber} value={b.barNumber}>
+                              第 {b.barNumber} 小節
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                  </div>
                 </div>
-              </div>
-              <div className="midi-bar-range">
-                <label className="midi-bar-field">
-                  <span>起</span>
-                  <select
-                    className="midi-select"
-                    aria-label="起始小節"
-                    value={songSettings.startBar}
-                    onChange={(e) => {
-                      const nextStart = Number(e.target.value);
-                      updateSongSettings({
-                        startBar: nextStart,
-                        endBar: Math.max(nextStart, songSettings.endBar),
-                      });
-                    }}
-                  >
-                    {bars.map((b) => (
-                      <option key={b.barNumber} value={b.barNumber}>
-                        第 {b.barNumber} 小節
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <span className="midi-bar-sep">–</span>
-                <label className="midi-bar-field">
-                  <span>訖</span>
-                  <select
-                    className="midi-select"
-                    aria-label="結束小節"
-                    value={songSettings.endBar}
-                    onChange={(e) => {
-                      const nextEnd = Number(e.target.value);
-                      updateSongSettings({
-                        endBar: Math.max(songSettings.startBar, nextEnd),
-                      });
-                    }}
-                  >
-                    {bars
-                      .filter((b) => b.barNumber >= songSettings.startBar)
-                      .map((b) => (
-                        <option key={b.barNumber} value={b.barNumber}>
-                          第 {b.barNumber} 小節
-                        </option>
-                      ))}
-                  </select>
-                </label>
-              </div>
-            </div>
+              );
+            })()}
 
             {/* 3. 移調 + 自動移調 */}
             <div className="setting-row setting-row-stack">

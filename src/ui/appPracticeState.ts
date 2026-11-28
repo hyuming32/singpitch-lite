@@ -1,7 +1,13 @@
 import { parseMidi, suggestMelodyTrack } from '../core/midi';
-import { computeMidiBars, defaultBarRangeForTrack } from '../core/midiExercise';
+import {
+  computeMidiBars,
+  defaultBarRangeForTrack,
+  vocalStartBarForTrack,
+} from '../core/midiExercise';
 import {
   loadMidiSongSettings,
+  migrateMidiSongRange,
+  saveMidiSongSettings,
   type MidiLibraryEntry,
   type MidiSongSettings,
 } from '../state/midiLibrary';
@@ -54,9 +60,23 @@ export function buildMidiSourceFromEntry(
   const asset = parseMidi(entry.bytes);
   const bars = computeMidiBars(asset);
   const maxBar = Math.max(1, bars.length);
-  const saved = loadMidiSongSettings(entry.hash);
+  const rawSaved = loadMidiSongSettings(entry.hash);
   const defaultTrackIndex =
     suggestMelodyTrack(asset) ?? asset.tracks[0]?.index ?? 0;
+  const effectiveTrackIndex = rawSaved?.trackIndex ?? defaultTrackIndex;
+  const effectiveTrack =
+    asset.tracks.find((t) => t.index === effectiveTrackIndex) ?? asset.tracks[0];
+  let saved = rawSaved;
+  if (saved) {
+    const legacyVocalBar = effectiveTrack
+      ? vocalStartBarForTrack(effectiveTrack, bars)
+      : null;
+    const migrated = migrateMidiSongRange(saved, legacyVocalBar);
+    if (migrated.changed) {
+      saved = migrated.settings;
+      saveMidiSongSettings(entry.hash, saved);
+    }
+  }
   const defaultTrack =
     asset.tracks.find((t) => t.index === defaultTrackIndex) ?? asset.tracks[0];
   const defaultRange = defaultTrack

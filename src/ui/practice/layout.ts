@@ -74,6 +74,9 @@ export interface StaffVerticalMetrics {
 
 /** 依練習時間表整理出所有（調性 × 遍數 × 階段）的顯示視窗 */
 export function listPassWindows(ex: Exercise): PassWindow[] {
+  if (ex.passWindows && ex.passWindows.length > 0) {
+    return ex.passWindows.map((w) => ({ ...w }));
+  }
   if (ex.notes.length === 0) {
     return [];
   }

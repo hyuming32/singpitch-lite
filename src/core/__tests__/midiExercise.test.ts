@@ -9,6 +9,7 @@ import {
   extractMelodyNotes,
   sliceMelodyByBars,
   transposeKey,
+  vocalStartBarForTrack,
 } from '../midiExercise';
 
 function makeNote(
@@ -212,7 +213,7 @@ describe('buildMidiExercise', () => {
     });
   });
 
-  it('defaultBarRangeForTrack 自動略過前奏與尾奏空白小節', () => {
+  it('defaultBarRangeForTrack 預設為整首（第 1 小節到最後一小節），vocalStartBarForTrack 回傳第一個主唱音小節', () => {
     // 120 BPM 4/4（每小節 2 秒），前 3 小節空白，第 4 小節後半（7.5s）起唱到第 6 小節（11.5s），後面還有一段尾奏（至 16s）
     const notes: MidiNote[] = [
       makeNote(7.5, 8.0, 64),
@@ -228,10 +229,11 @@ describe('buildMidiExercise', () => {
     const bars = computeMidiBars(asset);
     expect(bars).toHaveLength(8);
     expect(defaultBarRangeForTrack(asset.tracks[0]!, bars)).toEqual({
-      startBar: 4,
-      endBar: 6,
-      skippedIntroBars: 3,
+      startBar: 1,
+      endBar: 8,
+      skippedIntroBars: 0,
     });
+    expect(vocalStartBarForTrack(asset.tracks[0]!, bars)).toBe(4);
   });
 
   it('MIDI 跟唱 compileExercise 後 noteOn 數等於區間音數（即使 pianoDuringSing=false）；先聽再唱維持示範彈、唱遍依設定', () => {

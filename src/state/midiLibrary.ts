@@ -57,6 +57,8 @@ export interface MidiSongSettings {
   mixer?: MidiMixerSettings;
   /** 每首字幕時間位移（−10～+10 秒，每 0.05 秒一格） */
   lyricsOffsetSec?: number;
+  /** 使用者是否曾主動修改過 A–B 區間（舊資料遷移用） */
+  regionUserSet?: boolean;
 }
 
 /** 計算位元組陣列的 FNV-1a 32 位元十六進位雜湊值 */
@@ -393,6 +395,8 @@ export function sanitizeMidiSongSettings(raw: unknown): MidiSongSettings | null 
   const trackRoles = sanitizeTrackRoles(obj.trackRoles, trackIndex);
   const mixer = sanitizeMidiMixer(obj.mixer);
   const lyricsOffsetSec = sanitizeLyricsOffset(obj.lyricsOffsetSec);
+  const regionUserSet =
+    typeof obj.regionUserSet === 'boolean' ? obj.regionUserSet : undefined;
 
   return {
     trackIndex,
@@ -404,7 +408,35 @@ export function sanitizeMidiSongSettings(raw: unknown): MidiSongSettings | null 
     ...(trackRoles ? { trackRoles } : {}),
     ...(mixer ? { mixer } : {}),
     ...(lyricsOffsetSec !== undefined ? { lyricsOffsetSec } : {}),
+    ...(regionUserSet !== undefined ? { regionUserSet } : {}),
   };
+}
+
+/**
+ * 舊設定遷移：若尚未標記使用者自訂區間（regionUserSet !== true），
+ * 且 startBar 剛好等於舊版自動略過前奏算出的小節（> 1），則一次性重設回第 1 小節。
+ */
+export function migrateMidiSongRange(
+  settings: MidiSongSettings,
+  legacyAutoStartBar: number | null,
+): { settings: MidiSongSettings; changed: boolean } {
+  if (settings.regionUserSet) {
+    return { settings, changed: false };
+  }
+  if (
+    legacyAutoStartBar !== null &&
+    legacyAutoStartBar > 1 &&
+    settings.startBar === legacyAutoStartBar
+  ) {
+    return {
+      settings: {
+        ...settings,
+        startBar: 1,
+      },
+      changed: true,
+    };
+  }
+  return { settings, changed: false };
 }
 
 function readAllSongSettings(

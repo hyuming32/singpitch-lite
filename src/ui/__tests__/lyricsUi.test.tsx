@@ -215,6 +215,8 @@ describe('歌詞與進度拉桿 UI 元件渲染', () => {
     expect(html).toContain('第 2／2 小節');
     expect(html).toContain('0:02 / 0:04');
     expect(html).toContain('midi-seek-lyric-tick');
+    expect(html).toContain('midi-seek-vocal-marker');
+    expect(html).toContain('人聲：第 1 小節');
   });
 
   it('MidiPage 顯示歌詞區（來源、匯入字幕檔、移除按鈕與字幕位移滑桿）', () => {
@@ -255,6 +257,9 @@ describe('歌詞與進度拉桿 UI 元件渲染', () => {
     expect(html).toContain('移除匯入的字幕');
     expect(html).toContain('字幕位移');
     expect(html).toContain('+0.50 秒');
+    expect(html).toContain('人聲從第 1 小節開始');
+    expect(html).toContain('從人聲開始');
+    expect(html).not.toContain('已略過前奏');
   });
 
   it('PracticeSettingsSheet 顯示歌詞開關、歌詞大小與字幕提前設定', () => {

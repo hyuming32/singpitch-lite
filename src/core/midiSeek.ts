@@ -106,6 +106,44 @@ export function findLyricPreviewAtPassSec(
   return `${chars.slice(0, maxChars).join('')}…`;
 }
 
+export interface VocalStartSeekInfo {
+  /** 第一個主唱音所在的小節編號（1 起算） */
+  barNumber: number;
+  /** 該小節開頭相對於單遍起點的秒數 */
+  barStartPassSec: number;
+  /** 第一個主唱音相對於單遍起點的秒數 */
+  firstNotePassSec: number;
+  /** 第一個主唱音在進度拉桿上的正規化位置（0..1） */
+  ratio: number;
+}
+
+/** 計算單遍區間內第一個主唱音的位置與對應跳轉小節起點 */
+export function computeVocalStartSeekInfo(
+  scoreBars: readonly MidiScoreBar[],
+  totalPassDur: number,
+): VocalStartSeekInfo | null {
+  if (
+    scoreBars.length === 0 ||
+    !Number.isFinite(totalPassDur) ||
+    totalPassDur <= 0
+  ) {
+    return null;
+  }
+  for (const bar of scoreBars) {
+    for (const ev of bar.events) {
+      if (ev.kind === 'note') {
+        return {
+          barNumber: bar.barNumber,
+          barStartPassSec: bar.startSec,
+          firstNotePassSec: ev.startSec,
+          ratio: passSecToSeekRatio(ev.startSec, totalPassDur),
+        };
+      }
+    }
+  }
+  return null;
+}
+
 /** 計算每行歌詞起點在進度拉桿上的正規化位置（0..1） */
 export function computeSeekLyricTicks(
   lines: readonly LyricLine[],

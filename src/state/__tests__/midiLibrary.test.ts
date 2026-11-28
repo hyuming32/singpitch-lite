@@ -4,6 +4,7 @@ import {
   fnv1aHash,
   loadMidiSongSettings,
   MemoryMidiStore,
+  migrateMidiSongRange,
   resolveMidiMixer,
   saveMidiSongSettings,
   stripMidiExtension,
@@ -163,5 +164,40 @@ describe('MIDI 每首設定存取（localStorage）', () => {
     });
     expect(loadedNew!.mixer).toEqual(cfgWithMix.mixer);
     expect(resolveMidiMixer(loadedNew)).toEqual(cfgWithMix.mixer);
+  });
+
+  it('舊設定遷移規則：無 regionUserSet 且起點等於自動略過小節時重設為 1；有標記或不等於時不動', () => {
+    const base: MidiSongSettings = {
+      trackIndex: 0,
+      startBar: 7,
+      endBar: 32,
+      transposeSemitones: 0,
+      speedPercent: 100,
+      manualKey: null,
+    };
+
+    // 1. 無 regionUserSet 且 startBar === legacyAutoStartBar (7) -> 重設回 1
+    const migrated = migrateMidiSongRange(base, 7);
+    expect(migrated.changed).toBe(true);
+    expect(migrated.settings.startBar).toBe(1);
+    expect(migrated.settings.endBar).toBe(32);
+
+    // 2. 有 regionUserSet=true -> 即使等於 legacyAutoStartBar 也不動
+    const userSetRes = migrateMidiSongRange(
+      { ...base, regionUserSet: true },
+      7,
+    );
+    expect(userSetRes.changed).toBe(false);
+    expect(userSetRes.settings.startBar).toBe(7);
+
+    // 3. 無 regionUserSet 但 startBar !== legacyAutoStartBar -> 不動
+    const customStartRes = migrateMidiSongRange({ ...base, startBar: 5 }, 7);
+    expect(customStartRes.changed).toBe(false);
+    expect(customStartRes.settings.startBar).toBe(5);
+
+    // 4. 儲存與讀取保留 regionUserSet
+    const storage = createMemoryStorage();
+    saveMidiSongSettings('abc12345', { ...base, regionUserSet: true }, storage);
+    expect(loadMidiSongSettings('abc12345', storage)?.regionUserSet).toBe(true);
   });
 });

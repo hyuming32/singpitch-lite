@@ -79,6 +79,15 @@ export interface ClickEvent {
   accent: boolean;
 }
 
+export interface ExercisePassWindow {
+  keyIndex: number;
+  pass: number;
+  phase: 'listen' | 'sing';
+  isShadow?: boolean;
+  start: number;
+  end: number;
+}
+
 export interface Exercise {
   keys: KeyBlock[];
   notes: NoteEvent[];
@@ -86,6 +95,8 @@ export interface Exercise {
   clicks: ClickEvent[];
   /** 總時長（秒） */
   total: number;
+  /** 明確指定的各遍時間視窗（供區間開頭含休止的 MIDI 練唱使用；未提供時由音符自動推算） */
+  passWindows?: ExercisePassWindow[];
 }
 
 /** 將舊版或布林 cadence 設定正規化為 CadenceMode */

@@ -3,6 +3,7 @@ import type { MidiAsset } from '../midi';
 import { buildMidiExercise } from '../midiExercise';
 import {
   computeSeekLyricTicks,
+  computeVocalStartSeekInfo,
   findBarAtPassSec,
   findLyricPreviewAtPassSec,
   formatSeekTime,
@@ -120,5 +121,47 @@ describe('midiSeek 進度拉桿小節／拍點換算與對齊', () => {
     state = advanceSessionPlayback(state, 12, true, null, false, t0 + 13050);
     const entry = toLogEntry(pauseSession(state, t0 + 13050));
     expect(entry?.durationSec).toBe(13);
+  });
+
+  it('computeVocalStartSeekInfo 正確計算人聲起點小節、小節開頭秒數與拉桿標記比例', () => {
+    // 4 小節 60 BPM 4/4（共 16 秒），前 2 小節休止，第 3 小節第 3 拍（10.0s）出現第一個主唱音
+    const introAsset: MidiAsset = {
+      tracks: [
+        {
+          index: 0,
+          name: 'Vocal',
+          notes: [
+            {
+              start: 10.0,
+              end: 12.0,
+              midi: 64,
+              velocity: 90,
+              track: 0,
+              startTick: 4800,
+              endTick: 5760,
+            },
+          ],
+        },
+      ],
+      duration: 16.0,
+      ticksPerBeat: 480,
+      beats: Array.from({ length: 16 }, (_, i) => [i * 1.0, i % 4, 60]),
+    };
+
+    const res = buildMidiExercise(introAsset, {
+      trackIndex: 0,
+      startBar: 1,
+      endBar: 4,
+      countIn: true,
+    });
+    const totalPassDur = res.scoreBars[res.scoreBars.length - 1]!.endSec;
+    expect(totalPassDur).toBeCloseTo(16.0, 5);
+
+    const info = computeVocalStartSeekInfo(res.scoreBars, totalPassDur);
+    expect(info).not.toBeNull();
+    expect(info!.barNumber).toBe(3);
+    expect(info!.barStartPassSec).toBeCloseTo(8.0, 5);
+    expect(info!.firstNotePassSec).toBeCloseTo(10.0, 5);
+    expect(info!.ratio).toBeCloseTo(10.0 / 16.0, 5);
   });
 });

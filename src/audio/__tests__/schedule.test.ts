@@ -212,6 +212,38 @@ describe('compileExercise', () => {
     }
   });
 
+  it('countInOnClickBus：預備拍走 click 匯流排、之後每拍走 metro，不重複', () => {
+    const bpm = 120;
+    const countInBeats = 4;
+    const ex = buildExercise(majorArp, {
+      startTonic: 60,
+      low: 48,
+      high: 79,
+      bpm,
+      cadence: false,
+      countInBeats,
+      mode: 'follow',
+      repeats: 1,
+      transpose: 'fixed',
+    });
+    const compiled = compileExercise(ex, rate, {
+      beatClicks: true,
+      countInOnClickBus: true,
+      click: true,
+      bpm,
+    });
+    const clickBus = compiled.events.filter(
+      (e) => e.type === 'click' && e.bus === 'click',
+    );
+    const metroBus = compiled.events.filter(
+      (e) => e.type === 'click' && e.bus === 'metro',
+    );
+    expect(clickBus).toHaveLength(ex.clicks.length);
+    expect(metroBus.length).toBeGreaterThan(0);
+    const lastCountIn = Math.max(...clickBus.map((e) => e.frame));
+    expect(Math.min(...metroBus.map((e) => e.frame))).toBeGreaterThan(lastCountIn);
+  });
+
   it('supports decimal bpm=72.5 with beat interval 60/72.5 sec (< 1 sample error)', () => {
     const bpm = 72.5;
     const expectedBeatSec = 60 / bpm;

@@ -66,6 +66,8 @@ export interface CompileOptions {
   click?: boolean;
   /** 是否在整段練習中每拍產生節拍器事件（走 'metro' 匯流排） */
   beatClicks?: boolean;
+  /** beatClicks 時預備拍改走 'click' 匯流排（節拍器 'metro' 靜音時預備拍仍聽得到） */
+  countInOnClickBus?: boolean;
   /** 練習速度（BPM），供 beatClicks 計算拍長；未提供時由 ex.clicks 推算 */
   bpm?: number;
   /** MIDI 伴奏音符事件 */
@@ -162,6 +164,7 @@ export function compileExercise(
     voiceForGlide = true,
     click = true,
     beatClicks = false,
+    countInOnClickBus = false,
     bpm,
     accompNotes,
     rhythmHits,
@@ -283,6 +286,18 @@ export function compileExercise(
           continue;
         }
         lastFrame = frame;
+        if (countInOnClickBus && i < ex.clicks.length) {
+          if (click) {
+            const c = ex.clicks[i]!;
+            events.push({
+              frame: Math.round(c.t * rate),
+              type: 'click',
+              accent: c.accent,
+              bus: 'click',
+            });
+          }
+          continue;
+        }
         events.push({
           frame,
           type: 'click',

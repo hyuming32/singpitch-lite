@@ -347,17 +347,32 @@ export function PracticePage({
   const pitchShift = voiceDisplay.pitchShift;
   const octaveTag = voiceDisplay.octaveTag;
 
+  // 混音器只改音量匯流排；忽略 mixer 欄位，避免調整混音時重建練習、音訊重新 load 而停止播放
+  const stableMidiSourceRef = useRef<MidiPracticeSource | null>(null);
+  const buildMidiSource = useMemo(() => {
+    const prev = stableMidiSourceRef.current;
+    if (
+      prev &&
+      midiSource &&
+      isSameMidiSourceIgnoringMixer(prev, midiSource)
+    ) {
+      return prev;
+    }
+    stableMidiSourceRef.current = midiSource ?? null;
+    return midiSource ?? null;
+  }, [midiSource]);
+
   const midiBuild = useMemo(() => {
-    if (!midiSource) return null;
+    if (!buildMidiSource) return null;
     try {
-      const res = buildMidiExercise(midiSource.asset, {
-        trackIndex: midiSource.songSettings.trackIndex,
-        startBar: midiSource.songSettings.startBar,
-        endBar: midiSource.songSettings.endBar,
-        transposeSemitones: midiSource.songSettings.transposeSemitones,
-        speedPercent: midiSource.songSettings.speedPercent,
-        ...(midiSource.songSettings.manualKey
-          ? { originalKey: midiSource.songSettings.manualKey }
+      const res = buildMidiExercise(buildMidiSource.asset, {
+        trackIndex: buildMidiSource.songSettings.trackIndex,
+        startBar: buildMidiSource.songSettings.startBar,
+        endBar: buildMidiSource.songSettings.endBar,
+        transposeSemitones: buildMidiSource.songSettings.transposeSemitones,
+        speedPercent: buildMidiSource.songSettings.speedPercent,
+        ...(buildMidiSource.songSettings.manualKey
+          ? { originalKey: buildMidiSource.songSettings.manualKey }
           : {}),
         mode:
           settings.mode === 'listen-then-sing' ? 'listen-then-sing' : 'follow',
@@ -373,7 +388,7 @@ export function PracticePage({
       };
     }
   }, [
-    midiSource,
+    buildMidiSource,
     settings.mode,
     settings.repeatsPerKey,
     settings.countIn,
@@ -381,16 +396,16 @@ export function PracticePage({
   ]);
 
   const rawSongLyrics = useMemo(() => {
-    if (!midiSource) return null;
-    if (midiSource.importedLyrics?.document) {
-      return midiSource.importedLyrics.document;
+    if (!buildMidiSource) return null;
+    if (buildMidiSource.importedLyrics?.document) {
+      return buildMidiSource.importedLyrics.document;
     }
     const embedded = buildMidiLyricsDocument(
-      midiSource.asset,
-      midiSource.songSettings.trackIndex,
+      buildMidiSource.asset,
+      buildMidiSource.songSettings.trackIndex,
     );
     return embedded.lines.length > 0 ? embedded : null;
-  }, [midiSource]);
+  }, [buildMidiSource]);
 
   const passLyrics = useMemo(() => {
     if (!rawSongLyrics || !midiSource || !midiBuild?.res) {
@@ -514,23 +529,23 @@ export function PracticePage({
   );
 
   const midiMixLayers = useMemo(() => {
-    if (!midiSource) return null;
+    if (!buildMidiSource) return null;
     const trackRoles = resolveTrackRoles(
-      midiSource.asset,
-      midiSource.songSettings,
+      buildMidiSource.asset,
+      buildMidiSource.songSettings,
     );
-    return buildMidiMixLayers(midiSource.asset, {
+    return buildMidiMixLayers(buildMidiSource.asset, {
       trackRoles,
-      startBar: midiSource.songSettings.startBar,
-      endBar: midiSource.songSettings.endBar,
-      transposeSemitones: midiSource.songSettings.transposeSemitones,
-      speedPercent: midiSource.songSettings.speedPercent,
+      startBar: buildMidiSource.songSettings.startBar,
+      endBar: buildMidiSource.songSettings.endBar,
+      transposeSemitones: buildMidiSource.songSettings.transposeSemitones,
+      speedPercent: buildMidiSource.songSettings.speedPercent,
       mode:
         settings.mode === 'listen-then-sing' ? 'listen-then-sing' : 'follow',
       repeats: repeatsPerKeyToCount(settings.repeatsPerKey),
       countIn: settings.countIn,
     });
-  }, [midiSource, settings.mode, settings.repeatsPerKey, settings.countIn]);
+  }, [buildMidiSource, settings.mode, settings.repeatsPerKey, settings.countIn]);
 
   const rhythmActive =
     isMidiMode &&
@@ -559,21 +574,21 @@ export function PracticePage({
 
   const logSource = useMemo<PracticeLogSource>(
     () =>
-      midiSource
+      buildMidiSource
         ? {
             kind: 'midi',
-            midiId: midiSource.id,
-            midiName: stripMidiExtension(midiSource.name),
-            midiHash: midiSource.hash,
-            startBar: midiSource.songSettings.startBar,
-            endBar: midiSource.songSettings.endBar,
+            midiId: buildMidiSource.id,
+            midiName: stripMidiExtension(buildMidiSource.name),
+            midiHash: buildMidiSource.hash,
+            startBar: buildMidiSource.songSettings.startBar,
+            endBar: buildMidiSource.songSettings.endBar,
           }
         : {
             kind: 'scale',
             patternId: pattern.id,
             patternName: pattern.name,
           },
-    [midiSource, pattern.id, pattern.name],
+    [buildMidiSource, pattern.id, pattern.name],
   );
 
   const logContextRef = useRef<PracticeSessionContext>({
@@ -949,7 +964,9 @@ export function PracticePage({
       pianoDuringSing: effectivePianoDuringSing,
       pad: isMidiMode || isShadowMode ? false : settings.pad,
       click: settings.countIn,
-      beatClicks: isMidiMode ? effectiveMetronome : true,
+      // MIDI 模式一律排入節拍器、以 'metro' 音量開關，切換節奏組／節拍器不必重新 load
+      beatClicks: true,
+      countInOnClickBus: isMidiMode,
       bpm: effectiveBpm,
       voiceForGlide: true,
       ...(isMidiMode && midiMixLayers
@@ -965,7 +982,6 @@ export function PracticePage({
       isShadowMode,
       settings.pad,
       settings.countIn,
-      effectiveMetronome,
       effectiveBpm,
       midiMixLayers,
     ],
@@ -3116,5 +3132,30 @@ export function PracticePage({
         onClose={() => setSettingsOpen(false)}
       />
     </div>
+  );
+}
+
+function songSettingsEqualIgnoringMixer(
+  a: MidiPracticeSource['songSettings'],
+  b: MidiPracticeSource['songSettings'],
+): boolean {
+  if (a === b) return true;
+  const { mixer: _ma, ...restA } = a;
+  const { mixer: _mb, ...restB } = b;
+  return JSON.stringify(restA) === JSON.stringify(restB);
+}
+
+/** 兩個 MIDI 練唱來源除了混音器設定外是否完全相同 */
+function isSameMidiSourceIgnoringMixer(
+  a: MidiPracticeSource,
+  b: MidiPracticeSource,
+): boolean {
+  return (
+    a.id === b.id &&
+    a.hash === b.hash &&
+    a.name === b.name &&
+    a.asset === b.asset &&
+    a.importedLyrics === b.importedLyrics &&
+    songSettingsEqualIgnoringMixer(a.songSettings, b.songSettings)
   );
 }

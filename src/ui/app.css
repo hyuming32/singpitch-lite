@@ -3450,6 +3450,57 @@ button:disabled {
   border-top: 2px solid rgba(232, 180, 0, 0.85);
 }
 
+.range-kbd-band-tooclose {
+  background-color: rgba(120, 120, 130, 0.32);
+}
+
+.range-kbd-band-goal {
+  background-color: rgba(76, 164, 255, 0.22);
+  border-top: 3px solid rgba(76, 164, 255, 0.9);
+}
+
+.range-kbd-low-tag,
+.range-kbd-target-tag {
+  position: absolute;
+  bottom: 4px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.range-kbd-low-tag {
+  background-color: #2fbf71;
+  color: #fff;
+}
+
+.range-kbd-target-tag {
+  transform: none;
+  background-color: var(--blue, #4ca4ff);
+  color: #fff;
+}
+
+.range-test-confirmed {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background-color: rgba(47, 191, 113, 0.14);
+  border: 1px solid rgba(47, 191, 113, 0.55);
+  color: #2fbf71;
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.range-test-hint.is-need-higher {
+  color: var(--blue-text, #4ca4ff);
+  font-weight: 600;
+}
+
 .range-kbd-band-selected {
   background-color: rgba(76, 164, 255, 0.3);
   border-bottom: 2px solid rgba(76, 164, 255, 0.9);

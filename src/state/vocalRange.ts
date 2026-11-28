@@ -138,6 +138,26 @@ export function buildMeasuredRangeResult(
   };
 }
 
+export interface HighNoteGap {
+  /** 最高音至少要到的 MIDI（最低音＋最小跨度） */
+  targetMin: number;
+  /** 目前音高距離 targetMin 還差幾個半音（已達標為 0） */
+  missingSemitones: number;
+  /** 是否已達最小跨度，可以當成最高音 */
+  reached: boolean;
+}
+
+/**
+ * 試唱「最低＋最高」第 2 步：判斷目前唱的音是否離已確認的最低音夠遠。
+ * 不夠遠時不判失敗，而是回報還差幾個半音，讓畫面提示往上唱。
+ */
+export function highNoteGap(lowMidi: number, sungMidi: number): HighNoteGap {
+  const targetMin = Math.round(lowMidi) + MIN_MY_RANGE_SEMITONES;
+  const sung = Math.round(sungMidi);
+  const missingSemitones = Math.max(0, targetMin - sung);
+  return { targetMin, missingSemitones, reached: missingSemitones === 0 };
+}
+
 export type RangeBoundsInput =
   | readonly [number, number]
   | { low: number; high: number };

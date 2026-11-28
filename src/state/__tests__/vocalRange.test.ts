@@ -141,3 +141,17 @@ describe('patternFit 與推薦音型排序', () => {
     expect(resolveStartTonicForRange(majorArp, 50, 44, 68)).toBe(50);
   });
 });
+
+describe('highNoteGap', () => {
+  it('最低音 C3 時最高音至少要到 G#3（+8 半音）', async () => {
+    const { highNoteGap } = await import('../vocalRange');
+    expect(highNoteGap(48, 50)).toEqual({ targetMin: 56, missingSemitones: 6, reached: false });
+    expect(highNoteGap(48, 55.6)).toEqual({ targetMin: 56, missingSemitones: 0, reached: true });
+    expect(highNoteGap(48, 64)).toEqual({ targetMin: 56, missingSemitones: 0, reached: true });
+  });
+
+  it('唱得比最低音還低時，差距照算', async () => {
+    const { highNoteGap } = await import('../vocalRange');
+    expect(highNoteGap(48, 46).missingSemitones).toBe(10);
+  });
+});

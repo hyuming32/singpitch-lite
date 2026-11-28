@@ -15,6 +15,7 @@ import {
 } from '../state/settings';
 import {
   buildMeasuredRangeResult,
+  highNoteGap,
   rankPatternsForRange,
   resolveStartTonicForRange,
   type MeasuredRangeOutcome,
@@ -34,7 +35,7 @@ interface RangeTestSheetProps {
   onClose: () => void;
 }
 
-const TWO_NOTES_STEP_SETTLE_MS = 500;
+const TWO_NOTES_STEP_SETTLE_MS = 800;
 
 /** 試唱測音域全螢幕 Sheet（支援最低＋最高與滑音兩種測量方式） */
 export function RangeTestSheet({
@@ -53,6 +54,8 @@ export function RangeTestSheet({
   const [step1Midi, setStep1Midi] = useState<number | null>(null);
   const [steadyProgress, setSteadyProgress] = useState(0);
   const [steadyHint, setSteadyHint] = useState<string>('請開始發聲');
+  /** 第 2 步：目前唱的音離最低音太近時，還差幾個半音（null＝沒有在提示） */
+  const [needHigherBy, setNeedHigherBy] = useState<number | null>(null);
   const [glideElapsedSec, setGlideElapsedSec] = useState(0);
   const [liveSungMidi, setLiveSungMidi] = useState<number | null>(null);
   const [micStarting, setMicStarting] = useState(false);
@@ -99,6 +102,7 @@ export function RangeTestSheet({
       setSteadyProgress(0);
       setGlideElapsedSec(0);
       setLiveSungMidi(null);
+      setNeedHigherBy(null);
       setMicError(null);
       setOutcome(null);
       return;
@@ -182,10 +186,30 @@ export function RangeTestSheet({
         return;
       }
 
+      // 第 2 步：離最低音不到最小跨度的音不算最高音，也不判失敗；
+      // 清掉穩定度進度，提示往上唱、還差幾個半音
+      if (twoNoteStepRef.current === 2 && hasPitch && step1MidiRef.current !== null) {
+        const gap = highNoteGap(step1MidiRef.current, hzToMidi(frame.hz, a4Ref.current));
+        if (!gap.reached) {
+          detectorRef.current.reset();
+          setSteadyProgress(0);
+          setNeedHigherBy(gap.missingSemitones);
+          setSteadyHint(
+            `最低音已確認。請往上唱到 ${displayNoteName(gap.targetMin)} 以上（還差 ${gap.missingSemitones} 個半音）`,
+          );
+          return;
+        }
+        setNeedHigherBy(null);
+      }
+
       const status = detectorRef.current.push({ t: frame.t, hz: frame.hz });
       setSteadyProgress(status.progress);
       if (!hasPitch) {
-        setSteadyHint('請持續唱出單一穩定音高');
+        setSteadyHint(
+          twoNoteStepRef.current === 2 && step1MidiRef.current !== null
+            ? `請唱最高音（${displayNoteName(highNoteGap(step1MidiRef.current, step1MidiRef.current).targetMin)} 以上）`
+            : '請持續唱出單一穩定音高',
+        );
       } else if (status.stdCents !== null && status.stdCents >= 40) {
         setSteadyHint('音高跳動較大，請保持穩定');
       } else {
@@ -199,12 +223,25 @@ export function RangeTestSheet({
           twoNoteStepRef.current = 2;
           setTwoNoteStep(2);
           setSteadyProgress(0);
-          setSteadyHint('已記錄最低音！現在請唱最高音');
+          setSteadyHint(
+            `最低音已確認（${displayNoteName(status.midi)}）！可以先停一下，再唱最高音`,
+          );
           detectorRef.current = new SteadyNoteDetector(a4Ref.current);
           stepSettleUntilMsRef.current = performance.now() + TWO_NOTES_STEP_SETTLE_MS;
         } else {
           const lowMidi = step1MidiRef.current ?? status.midi;
           const highMidi = status.midi;
+          const gap = highNoteGap(lowMidi, highMidi);
+          if (!gap.reached) {
+            // 穩定音的中位數仍差一點：不判失敗，繼續請使用者往上
+            detectorRef.current.reset();
+            setSteadyProgress(0);
+            setNeedHigherBy(gap.missingSemitones);
+            setSteadyHint(
+              `${displayNoteName(highMidi)} 離最低音太近，請往上唱到 ${displayNoteName(gap.targetMin)} 以上（還差 ${gap.missingSemitones} 個半音）`,
+            );
+            return;
+          }
           void finishMeasurement(lowMidi, highMidi, 'twoNotes');
         }
       }
@@ -227,6 +264,7 @@ export function RangeTestSheet({
       setStep1Midi(null);
       setSteadyProgress(0);
       setSteadyHint('請開始發聲');
+      setNeedHigherBy(null);
       setGlideElapsedSec(0);
       setLiveSungMidi(null);
       setOutcome(null);
@@ -287,6 +325,7 @@ export function RangeTestSheet({
       detectorRef.current = new SteadyNoteDetector(settings.a4);
       setSteadyProgress(0);
       setSteadyHint('請重新唱出穩定音高');
+      setNeedHigherBy(null);
       stepSettleUntilMsRef.current = 0;
     } else {
       glideFramesRef.current = [];
@@ -303,6 +342,7 @@ export function RangeTestSheet({
     setTwoNoteStep(1);
     setSteadyProgress(0);
     setSteadyHint('請重新唱出最低音');
+    setNeedHigherBy(null);
     stepSettleUntilMsRef.current = 0;
   }
 
@@ -476,6 +516,12 @@ export function RangeTestSheet({
                   myRange={null}
                   liveSungMidi={liveSungMidi}
                   keyboardOnly
+                  confirmedLowMidi={method === 'twoNotes' ? step1Midi : null}
+                  highTargetMinMidi={
+                    method === 'twoNotes' && step1Midi !== null
+                      ? highNoteGap(step1Midi, step1Midi).targetMin
+                      : null
+                  }
                 />
                 <div className="range-test-note-readout">
                   <span className="range-test-note-caption">目前音高</span>
@@ -498,10 +544,18 @@ export function RangeTestSheet({
                     </span>
                   </div>
 
+                  {twoNoteStep === 2 && step1Midi !== null && (
+                    <p className="range-test-confirmed" role="status">
+                      ✓ 最低音已確認：{displayNoteName(step1Midi)}
+                    </p>
+                  )}
+
                   <p className="range-test-prompt">
                     {twoNoteStep === 1
                       ? '唱你最低、還舒服的音，撐 2 秒'
-                      : '唱你最高、還舒服的音，撐 2 秒'}
+                      : step1Midi !== null
+                        ? `換唱最高、還舒服的音（${displayNoteName(highNoteGap(step1Midi, step1Midi).targetMin)} 以上，鍵盤藍色區），撐 2 秒`
+                        : '唱你最高、還舒服的音，撐 2 秒'}
                   </p>
 
                   <div className="range-progress-track" aria-label="穩定度進度">
@@ -510,7 +564,12 @@ export function RangeTestSheet({
                       style={{ width: `${Math.round(steadyProgress * 100)}%` }}
                     />
                   </div>
-                  <p className="range-test-hint">{steadyHint}</p>
+                  <p
+                    className={`range-test-hint ${needHigherBy !== null ? 'is-need-higher' : ''}`}
+                    aria-live="polite"
+                  >
+                    {steadyHint}
+                  </p>
 
                   <div className="range-test-btn-row">
                     <button

@@ -112,3 +112,24 @@ describe('analyzeGlideFrames 滑音百分位與孤立幀排除', () => {
     expect(res).toBeNull();
   });
 });
+
+describe('SteadyNoteDetector.peekStable 候選音', () => {
+  it('穩定 0.5 秒以上但未滿 1.5 秒時回傳候選音', () => {
+    const det = new SteadyNoteDetector();
+    const hz = midiToHz(48);
+    for (let i = 0; i <= 8; i++) det.push({ t: i * 0.08, hz });
+    expect(det.peekStable(0.5)).toBe(48);
+  });
+
+  it('太短或跳動大時回傳 null', () => {
+    const det = new SteadyNoteDetector();
+    det.push({ t: 0, hz: midiToHz(48) });
+    det.push({ t: 0.1, hz: midiToHz(48) });
+    det.push({ t: 0.2, hz: midiToHz(48) });
+    expect(det.peekStable(0.5)).toBeNull();
+
+    const jumpy = new SteadyNoteDetector();
+    for (let i = 0; i <= 8; i++) jumpy.push({ t: i * 0.08, hz: midiToHz(i % 2 ? 48 : 52) });
+    expect(jumpy.peekStable(0.5)).toBeNull();
+  });
+});

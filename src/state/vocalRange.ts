@@ -92,13 +92,16 @@ export type MeasuredRangeOutcome =
       ok: true;
       raw: [number, number];
       semitones: number;
+      /** 跨度少於 MIN_MY_RANGE_SEMITONES：照實存、不內縮 */
+      narrow: boolean;
       myRange: MyRangeData;
       recommended: RecommendedVoiceResult;
     };
 
 /**
- * 將試唱測得的最低／最高 MIDI 轉為結果與「我的音域」（上下各內縮 1 半音舒適區）。
- * 若跨度少於 8 個半音，拒絕儲存並回傳「範圍太窄，請重測」。
+ * 將試唱測得的最低／最高 MIDI 轉為結果與「我的音域」。
+ * 跨度 ≥ 8 個半音時上下各內縮 1 半音當舒適區；不到 8 個半音（使用者按「盡力了」）
+ * 照實存、不內縮，也不判失敗。只有數值無效時才回傳 ok: false。
  */
 export function buildMeasuredRangeResult(
   rawA: number,
@@ -110,19 +113,20 @@ export function buildMeasuredRangeResult(
   const hi = Math.round(Math.max(rawA, rawB));
   const semitones = hi - lo;
 
-  if (!Number.isFinite(semitones) || semitones < MIN_MY_RANGE_SEMITONES) {
+  if (!Number.isFinite(semitones)) {
     return {
       ok: false,
-      error: '範圍太窄，請重測',
+      error: '沒有測到有效的音高，請重測',
       raw: [lo, hi],
-      semitones: Number.isFinite(semitones) ? semitones : 0,
+      semitones: 0,
     };
   }
 
+  const narrow = semitones < MIN_MY_RANGE_SEMITONES;
   const recommended = recommendVoiceRange(lo, hi);
   const myRange: MyRangeData = {
-    low: lo + 1,
-    high: hi - 1,
+    low: narrow ? lo : lo + 1,
+    high: narrow ? hi : hi - 1,
     raw: [lo, hi],
     method,
     voice: recommended.voice,
@@ -133,8 +137,27 @@ export function buildMeasuredRangeResult(
     ok: true,
     raw: [lo, hi],
     semitones,
+    narrow,
     myRange,
     recommended,
+  };
+}
+
+export interface MeasuredSpan {
+  low: number;
+  high: number;
+}
+
+/** 「想重測」只擴大不縮小：取兩次結果的聯集（任一為 null 時回傳另一個） */
+export function mergeMeasuredRange(
+  prev: MeasuredSpan | null,
+  next: MeasuredSpan | null,
+): MeasuredSpan | null {
+  if (!prev) return next ? { low: next.low, high: next.high } : null;
+  if (!next) return { low: prev.low, high: prev.high };
+  return {
+    low: Math.min(prev.low, next.low),
+    high: Math.max(prev.high, next.high),
   };
 }
 

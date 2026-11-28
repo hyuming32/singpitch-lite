@@ -3450,39 +3450,38 @@ button:disabled {
   border-top: 2px solid rgba(232, 180, 0, 0.85);
 }
 
-.range-kbd-band-tooclose {
-  background-color: rgba(120, 120, 130, 0.32);
+.range-kbd-goal-strip {
+  position: absolute;
+  top: 0;
+  height: 5px;
+  background-color: rgba(76, 164, 255, 0.95);
+  pointer-events: none;
+  z-index: 3;
 }
 
-.range-kbd-band-goal {
-  background-color: rgba(76, 164, 255, 0.22);
-  border-top: 3px solid rgba(76, 164, 255, 0.9);
-}
-
-.range-kbd-low-tag,
-.range-kbd-target-tag {
+.range-kbd-tag {
   position: absolute;
   bottom: 4px;
-  transform: translateX(-50%);
   white-space: nowrap;
   font-size: 12px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
   font-weight: 700;
   padding: 2px 8px;
   border-radius: 999px;
   pointer-events: none;
   z-index: 5;
-}
-
-.range-kbd-low-tag {
-  background-color: #2fbf71;
   color: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
 }
 
-.range-kbd-target-tag {
-  transform: none;
+.range-kbd-tag-low,
+.range-kbd-tag-high {
+  background-color: #1f8f52;
+}
+
+.range-kbd-tag-target {
+  bottom: auto;
+  top: 8px;
   background-color: var(--blue, #4ca4ff);
-  color: #fff;
 }
 
 .range-test-confirmed {
@@ -3499,6 +3498,17 @@ button:disabled {
 .range-test-hint.is-need-higher {
   color: var(--blue-text, #4ca4ff);
   font-weight: 600;
+}
+
+.range-test-hint.is-good {
+  color: #2fbf71;
+  font-weight: 600;
+}
+
+.range-test-confirm-range {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
 }
 
 .range-kbd-band-selected {

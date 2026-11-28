@@ -71,10 +71,42 @@ export interface RangeChartProps {
   showFullRangeOption?: boolean;
   /** 結果頁標記的推薦聲部名稱 */
   recommendedRangeName?: string | null;
-  /** 試唱中已確認的最低音（在鍵盤上標綠色並加標籤） */
+  /** 試唱中已確認（穩定）的最低音：此音到 confirmedHighMidi 的鍵塗實心綠 */
   confirmedLowMidi?: number | null;
-  /** 試唱第 2 步：最高音至少要到的音（此音以上標藍色目標區，以下到最低音標灰色「太近」區） */
+  /** 試唱中已確認的最高音；null 時只塗最低音那一鍵 */
+  confirmedHighMidi?: number | null;
+  /** 試唱第 2 步：最高音至少要到的音（此音以上鍵盤頂端標藍條＋「X 以上」） */
   highTargetMinMidi?: number | null;
+}
+
+/** 試唱時鍵盤每個鍵的狀態：已確認（實心綠）、正在唱（淡綠，跟著音高移動） */
+type TestKeyState = 'solid' | 'live' | null;
+
+const KEY_FILL = {
+  white: { solid: '#6fd69b', live: '#c6f0d6', base: '#f2f1ed' },
+  black: { solid: '#1f8f52', live: '#5fae83', base: '#1b1e25' },
+} as const;
+
+/**
+ * 算出某鍵在試唱時的狀態。
+ * - 已確認範圍 [low, high ?? low] 內 → solid
+ * - 目前唱的音在範圍外 → 從範圍邊緣延伸到目前音的鍵 → live
+ * - 還沒有確認任何音 → 只有目前唱的那一鍵 → live
+ */
+export function testKeyState(
+  midi: number,
+  confirmedLow: number | null,
+  confirmedHigh: number | null,
+  liveMidi: number | null,
+): TestKeyState {
+  const lo = confirmedLow;
+  const hi = confirmedLow === null ? null : (confirmedHigh ?? confirmedLow);
+  if (lo !== null && hi !== null && midi >= lo && midi <= hi) return 'solid';
+  if (liveMidi === null) return null;
+  if (lo === null || hi === null) return midi === liveMidi ? 'live' : null;
+  if (liveMidi < lo) return midi >= liveMidi && midi < lo ? 'live' : null;
+  if (liveMidi > hi) return midi > hi && midi <= liveMidi ? 'live' : null;
+  return null;
 }
 
 /** 音域圖元件：上方 MIDI 36–86 鋼琴鍵盤，下方聲部與我的音域對齊色塊條 */
@@ -87,6 +119,7 @@ export function RangeChart({
   showFullRangeOption = false,
   recommendedRangeName = null,
   confirmedLowMidi = null,
+  confirmedHighMidi = null,
   highTargetMinMidi = null,
 }: RangeChartProps) {
   const layout = KEYBOARD_LAYOUT;
@@ -139,40 +172,50 @@ export function RangeChart({
     return (nx / layout.totalWidth) * 100;
   }, [liveSungMidi, layout]);
 
-  const confirmedLow = useMemo(() => {
-    if (confirmedLowMidi === null || !Number.isFinite(confirmedLowMidi)) return null;
-    const midi = Math.round(confirmedLowMidi);
-    const [x0, x1] = keyBoundsX(midi, layout);
-    return {
-      midi,
-      black: isBlackMidi(midi),
-      x0,
-      x1,
-      centerPct: keyCenterPct(midi, layout),
-    };
-  }, [confirmedLowMidi, layout]);
+  const testLow =
+    confirmedLowMidi !== null && Number.isFinite(confirmedLowMidi)
+      ? Math.round(confirmedLowMidi)
+      : null;
+  const testHigh =
+    testLow !== null && confirmedHighMidi !== null && Number.isFinite(confirmedHighMidi)
+      ? Math.round(confirmedHighMidi)
+      : null;
+  const liveKey =
+    liveSungMidi !== null && Number.isFinite(liveSungMidi)
+      ? Math.max(layout.lowMidi, Math.min(layout.highMidi, Math.round(liveSungMidi)))
+      : null;
+  const testMode = testLow !== null || (keyboardOnly && liveKey !== null);
 
-  const highZones = useMemo(() => {
-    if (
-      confirmedLowMidi === null ||
-      highTargetMinMidi === null ||
-      !Number.isFinite(highTargetMinMidi)
-    ) {
-      return null;
+  const keyFill = (midi: number, black: boolean): string => {
+    const palette = black ? KEY_FILL.black : KEY_FILL.white;
+    if (!testMode) return palette.base;
+    const st = testKeyState(midi, testLow, testHigh, liveKey);
+    return st ? palette[st] : palette.base;
+  };
+
+  /** 標籤錨點：靠左邊緣時往右長、靠右邊緣時往左長，避免被裁掉 */
+  const tagFor = (midi: number, side: 'low' | 'high') => {
+    const [x0, x1] = keyBoundsX(midi, layout);
+    const leftPct = (x0 / layout.totalWidth) * 100;
+    const rightPct = (x1 / layout.totalWidth) * 100;
+    if (side === 'low') {
+      return leftPct < 14
+        ? { left: `${leftPct}%` }
+        : { left: `${rightPct}%`, transform: 'translateX(-100%)' };
     }
-    const low = Math.round(confirmedLowMidi);
-    const target = Math.round(highTargetMinMidi);
-    const tooClose =
-      target - 1 > low ? rangeBoundsPct(low + 1, target - 1, layout) : null;
-    const goal =
-      target <= layout.highMidi ? rangeBoundsPct(target, layout.highMidi, layout) : null;
-    return {
-      tooClose,
-      goal,
-      targetPct: keyCenterPct(Math.min(layout.highMidi, target), layout),
-      targetLabel: displayNoteName(target),
-    };
-  }, [confirmedLowMidi, highTargetMinMidi, layout]);
+    return rightPct > 86
+      ? { left: `${rightPct}%`, transform: 'translateX(-100%)' }
+      : { left: `${leftPct}%` };
+  };
+
+  const targetMin =
+    testLow !== null && highTargetMinMidi !== null && Number.isFinite(highTargetMinMidi)
+      ? Math.round(highTargetMinMidi)
+      : null;
+  const goalPct =
+    targetMin !== null && targetMin <= layout.highMidi
+      ? rangeBoundsPct(targetMin, layout.highMidi, layout)
+      : null;
 
   const maleParts = VOCAL_RANGE_PARTS.filter((p) => p.group === 'male');
   const femaleParts = VOCAL_RANGE_PARTS.filter((p) => p.group === 'normal');
@@ -204,7 +247,7 @@ export function RangeChart({
               width={wk.w}
               height={wk.len}
               rx={10}
-              fill="#f2f1ed"
+              fill={keyFill(wk.midi, false)}
               stroke="#cbd5e1"
               strokeWidth={4}
             />
@@ -217,61 +260,10 @@ export function RangeChart({
               width={bk.w}
               height={bk.len}
               rx={8}
-              fill="#1b1e25"
+              fill={keyFill(bk.midi, true)}
             />
           ))}
-          {confirmedLow && (
-            <rect
-              x={confirmedLow.x0}
-              y={0}
-              width={confirmedLow.x1 - confirmedLow.x0}
-              height={confirmedLow.black ? layout.blacks[0]?.len ?? layout.whiteLen : layout.whiteLen}
-              rx={confirmedLow.black ? 8 : 10}
-              fill="#2fbf71"
-              stroke="#1f8f52"
-              strokeWidth={4}
-              className="range-kbd-low-key"
-            />
-          )}
         </svg>
-
-        {/* 試唱第 2 步：灰色「離最低音太近」區、藍色「最高音目標」區 */}
-        {highZones?.tooClose && (
-          <div
-            className="range-kbd-band range-kbd-band-tooclose"
-            style={{
-              left: `${highZones.tooClose.leftPct}%`,
-              width: `${highZones.tooClose.widthPct}%`,
-            }}
-            aria-hidden="true"
-          />
-        )}
-        {highZones?.goal && (
-          <div
-            className="range-kbd-band range-kbd-band-goal"
-            style={{
-              left: `${highZones.goal.leftPct}%`,
-              width: `${highZones.goal.widthPct}%`,
-            }}
-            aria-hidden="true"
-          />
-        )}
-        {highZones && (
-          <span
-            className="range-kbd-target-tag"
-            style={{ left: `${highZones.targetPct}%` }}
-          >
-            {highZones.targetLabel} 以上
-          </span>
-        )}
-        {confirmedLow && (
-          <span
-            className="range-kbd-low-tag"
-            style={{ left: `${confirmedLow.centerPct}%` }}
-          >
-            ✓ 最低 {displayNoteName(confirmedLow.midi)}
-          </span>
-        )}
 
         {/* 半透明黃色帶（我的音域） */}
         {myBandPct && !keyboardOnly && (
@@ -295,6 +287,30 @@ export function RangeChart({
             }}
             aria-hidden="true"
           />
+        )}
+
+        {/* 試唱第 2 步：最高音目標區（頂端藍條） */}
+        {goalPct && (
+          <div
+            className="range-kbd-goal-strip"
+            style={{ left: `${goalPct.leftPct}%`, width: `${goalPct.widthPct}%` }}
+            aria-hidden="true"
+          />
+        )}
+        {targetMin !== null && goalPct && (
+          <span className="range-kbd-tag range-kbd-tag-target" style={tagFor(targetMin, 'high')}>
+            {displayNoteName(targetMin)} 以上
+          </span>
+        )}
+        {testLow !== null && (
+          <span className="range-kbd-tag range-kbd-tag-low" style={tagFor(testLow, 'low')}>
+            ✓ 最低 {displayNoteName(testLow)}
+          </span>
+        )}
+        {testHigh !== null && testHigh !== testLow && (
+          <span className="range-kbd-tag range-kbd-tag-high" style={tagFor(testHigh, 'high')}>
+            ✓ 最高 {displayNoteName(testHigh)}
+          </span>
         )}
 
         {/* C2..C6 標記 */}

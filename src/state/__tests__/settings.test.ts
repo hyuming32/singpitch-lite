@@ -418,7 +418,7 @@ describe('myRange 序列化、舊設定相容與 getRangeBounds', () => {
     expect(getRangeBounds(MY_RANGE_NAME, null)).toEqual([57, 81]);
   });
 
-  it('myRange 存取來回一致，且過窄的 myRange 會被 sanitizeSettings 剔除', () => {
+  it('myRange 存取來回一致，且窄音域保留、壞資料剔除', () => {
     const storage = createMemoryStorage();
     const myRange = {
       low: 45,
@@ -443,20 +443,36 @@ describe('myRange 序列化、舊設定相容與 getRangeBounds', () => {
     expect(loaded.myRange).toEqual(myRange);
     expect(getRangeBounds(MY_RANGE_NAME, loaded.myRange)).toEqual([45, 67]);
 
-    // 過窄（raw 僅 6 個半音 < 8）應被忽略
-    const tooNarrow = sanitizeSettings({
+    // 窄音域（「盡力了」照實存）要保留
+    const narrow = sanitizeSettings({
       rangeName: MY_RANGE_NAME,
       myRange: {
-        low: 51,
-        high: 55,
+        low: 50,
+        high: 56,
         raw: [50, 56],
         method: 'glide',
         voice: 'normal',
         measuredAt: '2026-11-27T08:00:00.000Z',
       },
     });
-    expect(tooNarrow.myRange).toBeNull();
-    expect(tooNarrow.rangeName).toBe(DEFAULT_SETTINGS.rangeName);
+    expect(narrow.myRange?.low).toBe(50);
+    expect(narrow.myRange?.high).toBe(56);
+    expect(narrow.rangeName).toBe(MY_RANGE_NAME);
+
+    // low > high 的壞資料仍剔除
+    const broken = sanitizeSettings({
+      rangeName: MY_RANGE_NAME,
+      myRange: {
+        low: 60,
+        high: 55,
+        raw: [60, 55],
+        method: 'glide',
+        voice: 'normal',
+        measuredAt: '2026-11-27T08:00:00.000Z',
+      },
+    });
+    expect(broken.myRange).toBeNull();
+    expect(broken.rangeName).toBe(DEFAULT_SETTINGS.rangeName);
   });
 });
 

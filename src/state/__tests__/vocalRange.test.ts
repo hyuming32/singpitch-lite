@@ -89,15 +89,30 @@ describe('buildMeasuredRangeResult 舒適區內縮與窄音域拒絕', () => {
     expect(res.myRange.high).toBe(83);
   });
 
-  it('少於 8 個半音時拒絕儲存並回傳錯誤訊息', () => {
+  it('少於 8 個半音時照實存、不內縮、標記 narrow', () => {
     const res = buildMeasuredRangeResult(60, 67, 'glide');
-    expect(res.ok).toBe(false);
-    if (res.ok) return;
-    expect(res.error).toBe('範圍太窄，請重測');
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.narrow).toBe(true);
+    expect(res.myRange.low).toBe(60);
+    expect(res.myRange.high).toBe(67);
 
-    // 剛好 8 個半音應通過
-    const edgeOk = buildMeasuredRangeResult(60, 68, 'glide');
-    expect(edgeOk.ok).toBe(true);
+    // 剛好 8 個半音：一般處理（內縮 1 半音）
+    const edge = buildMeasuredRangeResult(60, 68, 'glide');
+    expect(edge.ok).toBe(true);
+    if (!edge.ok) return;
+    expect(edge.narrow).toBe(false);
+    expect(edge.myRange.low).toBe(61);
+    expect(edge.myRange.high).toBe(67);
+  });
+
+  it('只測到一個音也能存', () => {
+    const res = buildMeasuredRangeResult(60, 60, 'twoNotes');
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.semitones).toBe(0);
+    expect(res.myRange.low).toBe(60);
+    expect(res.myRange.high).toBe(60);
   });
 });
 
@@ -153,5 +168,16 @@ describe('highNoteGap', () => {
   it('唱得比最低音還低時，差距照算', async () => {
     const { highNoteGap } = await import('../vocalRange');
     expect(highNoteGap(48, 46).missingSemitones).toBe(10);
+  });
+});
+
+describe('mergeMeasuredRange（想重測只擴大）', () => {
+  it('取聯集，任一為 null 時回傳另一個', async () => {
+    const { mergeMeasuredRange } = await import('../vocalRange');
+    expect(mergeMeasuredRange({ low: 48, high: 69 }, { low: 50, high: 72 })).toEqual({ low: 48, high: 72 });
+    expect(mergeMeasuredRange({ low: 48, high: 69 }, { low: 52, high: 60 })).toEqual({ low: 48, high: 69 });
+    expect(mergeMeasuredRange(null, { low: 50, high: 60 })).toEqual({ low: 50, high: 60 });
+    expect(mergeMeasuredRange({ low: 50, high: 60 }, null)).toEqual({ low: 50, high: 60 });
+    expect(mergeMeasuredRange(null, null)).toBeNull();
   });
 });

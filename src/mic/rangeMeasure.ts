@@ -67,6 +67,21 @@ export class SteadyNoteDetector {
     this.lastPitchedT = null;
   }
 
+  /**
+   * 尚未鎖定前，目前窗口若已穩定至少 minSec 秒，回傳其中位數四捨五入的 MIDI；
+   * 給「這是我最低了／唱不上去了」取用目前最穩的候選音。
+   */
+  peekStable(minSec = 0.5): number | null {
+    if (this.frames.length < 3) return null;
+    const spanSec = this.frames[this.frames.length - 1]!.t - this.frames[0]!.t;
+    if (spanSec < minSec - 1e-6) return null;
+    const hzs = this.frames.map((f) => f.hz);
+    const std = computePitchStdCents(hzs);
+    if (std === null || std >= STEADY_MAX_STD_CENTS) return null;
+    const m = hzToMidi(computeMedian(hzs), this.a4);
+    return Number.isFinite(m) ? Math.round(m) : null;
+  }
+
   push(frame: PitchSampleFrame): SteadyNoteProgress {
     const { t, hz } = frame;
     if (!Number.isFinite(t)) {

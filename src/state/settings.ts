@@ -302,12 +302,8 @@ function sanitizeMyRange(value: unknown): MyRangeData | null {
   }
   const rawLow = Math.round(r0);
   const rawHigh = Math.round(r1);
-  if (
-    rawLow < 21 ||
-    rawHigh > 108 ||
-    rawHigh - rawLow < MIN_MY_RANGE_SEMITONES ||
-    high - low < MIN_MY_RANGE_SEMITONES - 2
-  ) {
+  // 2026-11-28：使用者按「盡力了」時窄音域也照實存，不再以最小跨度拒絕
+  if (rawLow < 21 || rawHigh > 108 || rawLow > rawHigh) {
     return null;
   }
 

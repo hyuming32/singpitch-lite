@@ -67,6 +67,10 @@ export interface MidiExerciseResult {
   melodyNotes: MidiNote[];
   /** 量化後的逐小節樂譜資料（時間相對於單遍起點，已套用移調、displayTranspose 與變速） */
   scoreBars: MidiScoreBar[];
+  /** A–B 區間在原曲中的起點秒數 */
+  regionStartOrigSec?: number;
+  /** A–B 區間在原曲中的終點秒數 */
+  regionEndOrigSec?: number;
 }
 
 const EPS = 1e-6;
@@ -602,5 +606,7 @@ export function buildMidiExercise(
     transposedKey,
     melodyNotes: sliced.notes,
     scoreBars,
+    regionStartOrigSec: sliced.regionStart,
+    regionEndOrigSec: sliced.regionEnd,
   };
 }

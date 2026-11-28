@@ -29,6 +29,10 @@ export interface ViewportLayoutInput {
   safePaddingY?: number;
   /** 實測或安全區水平內距總和（padLeft + padRight） */
   safePaddingX?: number;
+  /** 額外頂／底工具列高度（例如 MIDI 進度拉桿），預設 0 */
+  extraChromeHeight?: number;
+  /** 譜面內卡拉 OK 歌詞帶高度（px），預設 0 */
+  lyricsBandHeight?: number;
 }
 
 export interface ViewportLayoutResult {
@@ -115,17 +119,19 @@ export function computeViewportLayout(
   const sheetPadY = isTablet ? 16 : 4;
   const jianpuHeight = isTablet ? 52 : 24;
   const minLineHeight = minScoreLineHeight(isTablet);
+  const extraChromeH = Math.max(0, Math.round(input.extraChromeHeight ?? 0));
+  const lyricsBandH = Math.max(0, Math.round(input.lyricsBandHeight ?? 0));
 
   // 正常情況下優先保留給「1 行完整五線譜＋簡譜」的最小面板高度
   const minPreferredSheetPaperH = isTablet ? 203 : 175;
   // 使用者手動展開時，仍須保證 1 行五線譜含上下加線各 2 條不被裁切的嚴格最小高度
   const minUnclippedStaffH = isTablet ? 90 : 72;
   const minUnclippedSheetPaperH =
-    sheetPadY + centsHeight + jianpuHeight + minUnclippedStaffH;
+    sheetPadY + centsHeight + lyricsBandH + jianpuHeight + minUnclippedStaffH;
 
   const workspaceHeight = Math.max(
     0,
-    viewportHeight - padY - headerHeight - transportHeight - pageGap * 2,
+    viewportHeight - padY - headerHeight - transportHeight - extraChromeH - pageGap * 2,
   );
   const availableSheetPlusPiano = Math.max(
     0,
@@ -198,7 +204,7 @@ export function computeViewportLayout(
   const sheetPaperHeight = Math.max(0, availableSheetPlusPiano - pianoHeight);
   const scoreAreaHeight = Math.max(
     0,
-    sheetPaperHeight - sheetPadY - centsHeight,
+    sheetPaperHeight - sheetPadY - centsHeight - lyricsBandH,
   );
 
   // 兩行樂譜僅在每行皆能 >= 最小行高（並計入 1px 分隔線）時才出現
@@ -248,6 +254,8 @@ export interface PortraitLayoutOptions {
   collapsedPref?: PianoCollapsedPref;
   preferredPianoHeight?: number | null;
   overridePianoHeight?: number | null;
+  extraChromeHeight?: number;
+  lyricsBandHeight?: number;
 }
 
 export interface PortraitLayoutResult {
@@ -325,6 +333,8 @@ export function computePortraitLayout(
   const wsGap = 4;
   const sheetPadY = 4;
   const minLineHeight = PORTRAIT_MIN_LINE_HEIGHT; // 88
+  const extraChromeH = Math.max(0, Math.round(options.extraChromeHeight ?? 0));
+  const lyricsBandH = Math.max(0, Math.round(options.lyricsBandHeight ?? 0));
 
   // 頁面直向四塊：header + workspace + patternTitle + transport（共 3 個 pageGap）
   const workspaceHeight = Math.max(
@@ -334,6 +344,7 @@ export function computePortraitLayout(
       headerHeight -
       patternTitleHeight -
       transportHeight -
+      extraChromeH -
       pageGap * 3,
   );
   const availableSheetPlusPiano = Math.max(
@@ -350,7 +361,7 @@ export function computePortraitLayout(
     sheetPadY + centsHeight + minLineHeight * 3 + 2;
   const minUnclippedStaffH = 66;
   const minUnclippedSheetPaperH =
-    sheetPadY + centsHeight + jianpuHeight + minUnclippedStaffH;
+    sheetPadY + centsHeight + lyricsBandH + jianpuHeight + minUnclippedStaffH;
   const strictMaxPianoH = Math.max(
     0,
     availableSheetPlusPiano - minUnclippedSheetPaperH,
@@ -408,7 +419,7 @@ export function computePortraitLayout(
   const sheetPaperHeight = Math.max(0, availableSheetPlusPiano - pianoHeight);
   const scoreAreaHeight = Math.max(
     0,
-    sheetPaperHeight - sheetPadY - centsHeight,
+    sheetPaperHeight - sheetPadY - centsHeight - lyricsBandH,
   );
 
   let lineCount: 1 | 2 | 3 = 1;
@@ -432,6 +443,7 @@ export function computePortraitLayout(
     wsGap * 2 +
     patternTitleHeight +
     transportHeight +
+    extraChromeH +
     pageGap * 3;
 
   return {

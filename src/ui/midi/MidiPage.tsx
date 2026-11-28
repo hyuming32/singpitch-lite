@@ -24,10 +24,23 @@ import {
   setTrackRole,
 } from '../../core/midiMix';
 import {
+  buildMidiLyricsDocument,
+  parseSubtitleFile,
+} from '../../core/lyrics';
+import {
+  createLyricsStore,
+  type ImportedLyricsEntry,
+  type LyricsStore,
+} from '../../state/lyricsStore';
+import {
   createMidiStore,
   DEFAULT_MIDI_MIXER,
   fnv1aHash,
   loadMidiSongSettings,
+  MIDI_LYRICS_OFFSET_MAX,
+  MIDI_LYRICS_OFFSET_MIN,
+  MIDI_LYRICS_OFFSET_STEP,
+  resolveMidiLyricsOffset,
   resolveMidiMixer,
   saveMidiSongSettings,
   stripMidiExtension,
@@ -51,6 +64,7 @@ export interface MidiPracticeSource {
   name: string;
   asset: MidiAsset;
   songSettings: MidiSongSettings;
+  importedLyrics?: ImportedLyricsEntry | null;
 }
 
 interface MidiPageProps {
@@ -60,6 +74,7 @@ interface MidiPageProps {
   /** 若剛從練唱頁返回，保留先前開啟的 MIDI 來源 */
   initialSource?: MidiPracticeSource | null;
   store?: MidiStore;
+  lyricsStore?: LyricsStore;
 }
 
 const CONFIDENCE_LABEL: Record<KeyConfidence, string> = {
@@ -140,14 +155,25 @@ export function MidiPage({
   onStartMidiPractice,
   initialSource = null,
   store: propStore,
+  lyricsStore: propLyricsStore,
 }: MidiPageProps) {
   const store = useMemo(() => propStore ?? createMidiStore(), [propStore]);
+  const lyricsStore = useMemo(
+    () => propLyricsStore ?? createLyricsStore(),
+    [propLyricsStore],
+  );
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const lyricsInputRef = useRef<HTMLInputElement | null>(null);
 
   const [library, setLibrary] = useState<MidiLibraryMeta[]>([]);
   const [loadingList, setLoadingList] = useState(true);
   const [importError, setImportError] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [importedLyrics, setImportedLyrics] =
+    useState<ImportedLyricsEntry | null>(
+      () => initialSource?.importedLyrics ?? null,
+    );
+  const [lyricsError, setLyricsError] = useState<string | null>(null);
 
   const [activeItem, setActiveItem] = useState<{
     id: string;
@@ -195,6 +221,35 @@ export function MidiPage({
       cancelled = true;
     };
   }, [store]);
+
+  // 載入目前曲目的匯入字幕（若從初始來源進來且尚未帶入）
+  const activeItemId = activeItem?.id ?? null;
+  useEffect(() => {
+    if (!activeItemId) {
+      setImportedLyrics(null);
+      setLyricsError(null);
+      return;
+    }
+    let cancelled = false;
+    lyricsStore
+      .get(activeItemId)
+      .then((entry) => {
+        if (!cancelled && entry) {
+          setImportedLyrics(entry);
+        }
+      })
+      .catch(() => {
+        // 忽略讀取字幕失敗
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeItemId, lyricsStore]);
+
+  const embeddedLyrics = useMemo(() => {
+    if (!activeItem || !songSettings) return null;
+    return buildMidiLyricsDocument(activeItem.asset, songSettings.trackIndex);
+  }, [activeItem, songSettings]);
 
   const bars = useMemo(
     () => (activeItem ? computeMidiBars(activeItem.asset) : []),
@@ -322,6 +377,9 @@ export function MidiPage({
       setActiveItem({ id: hash, hash, name: file.name, asset });
       setSongSettings(normalized);
       setConfirmDeleteId(null);
+      setLyricsError(null);
+      const existingLyrics = await lyricsStore.get(hash).catch(() => null);
+      setImportedLyrics(existingLyrics);
 
       if (isNewMixSetup) {
         setDraftTrackRoles(initialRoles);
@@ -353,6 +411,9 @@ export function MidiPage({
       const asset = parseMidi(entry.bytes);
       const saved = loadMidiSongSettings(entry.hash);
       const initial = saved ?? defaultSongSettings(asset);
+      const savedLyrics = await lyricsStore.get(entry.id).catch(() => null);
+      setLyricsError(null);
+      setImportedLyrics(savedLyrics);
       setActiveItem({
         id: entry.id,
         hash: entry.hash,
@@ -413,13 +474,46 @@ export function MidiPage({
 
   async function handleDeleteEntry(id: string) {
     await store.delete(id);
+    await lyricsStore.delete(id).catch(() => {});
     const updatedList = await store.list();
     setLibrary(updatedList);
     setConfirmDeleteId(null);
     if (activeItem?.id === id) {
       setActiveItem(null);
       setSongSettings(null);
+      setImportedLyrics(null);
+      setLyricsError(null);
     }
+  }
+
+  async function handleLyricsFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !activeItem) return;
+
+    setLyricsError(null);
+    try {
+      const buf = await file.arrayBuffer();
+      const bytes = new Uint8Array(buf);
+      const doc = parseSubtitleFile(bytes, file.name);
+      const entry: ImportedLyricsEntry = {
+        id: activeItem.id,
+        fileName: file.name,
+        importedAt: new Date().toISOString(),
+        document: doc,
+      };
+      await lyricsStore.put(entry);
+      setImportedLyrics(entry);
+    } catch (err) {
+      setLyricsError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function handleRemoveImportedLyrics() {
+    if (!activeItem) return;
+    setLyricsError(null);
+    await lyricsStore.delete(activeItem.id).catch(() => {});
+    setImportedLyrics(null);
   }
 
   function handleAutoTranspose() {
@@ -442,6 +536,7 @@ export function MidiPage({
       name: activeItem.name,
       asset: activeItem.asset,
       songSettings: finalized,
+      importedLyrics,
     });
   }
 
@@ -917,6 +1012,109 @@ export function MidiPage({
                 ))}
               </div>
             </div>
+
+            {/* 7. 歌詞設定與外掛字幕匯入 */}
+            {(() => {
+              const hasEmbedded = Boolean(
+                embeddedLyrics && embeddedLyrics.lines.length > 0,
+              );
+              const lyricsSourceLabel = importedLyrics
+                ? importedLyrics.fileName
+                : hasEmbedded
+                  ? `MIDI 內嵌（${embeddedLyrics!.lines.length} 行）`
+                  : '無';
+              const lyricsOffset = resolveMidiLyricsOffset(songSettings);
+              const offsetDisplay =
+                lyricsOffset > 0
+                  ? `+${lyricsOffset.toFixed(2)} 秒`
+                  : lyricsOffset < 0
+                    ? `−${Math.abs(lyricsOffset).toFixed(2)} 秒`
+                    : '0.00 秒';
+              return (
+                <div className="setting-row setting-row-stack midi-lyrics-section">
+                  <div className="setting-row-inline-head">
+                    <span className="setting-label">歌詞</span>
+                    <span className="setting-value-badge">
+                      來源：{lyricsSourceLabel}
+                    </span>
+                  </div>
+
+                  <div className="midi-lyrics-actions">
+                    <input
+                      ref={lyricsInputRef}
+                      type="file"
+                      accept=".lrc,.ass,.txt,.json"
+                      className="midi-file-input"
+                      aria-label="匯入字幕檔"
+                      onChange={handleLyricsFileChange}
+                    />
+                    <button
+                      type="button"
+                      className="midi-lyrics-import-btn"
+                      onClick={() => lyricsInputRef.current?.click()}
+                    >
+                      匯入字幕檔
+                    </button>
+                    {importedLyrics && (
+                      <button
+                        type="button"
+                        className="midi-lyrics-remove-btn"
+                        onClick={() => void handleRemoveImportedLyrics()}
+                      >
+                        移除匯入的字幕
+                      </button>
+                    )}
+                  </div>
+
+                  {lyricsError && (
+                    <p className="midi-notice-error" role="alert">
+                      {lyricsError}
+                    </p>
+                  )}
+
+                  <div className="midi-lyrics-offset-box">
+                    <div className="setting-row-inline-head">
+                      <label
+                        className="setting-label"
+                        htmlFor="midi-lyrics-offset"
+                      >
+                        字幕位移
+                      </label>
+                      <div className="midi-range-head-actions">
+                        <span className="setting-value-badge">
+                          {offsetDisplay}
+                        </span>
+                        {lyricsOffset !== 0 && (
+                          <button
+                            type="button"
+                            className="midi-inline-link"
+                            onClick={() =>
+                              updateSongSettings({ lyricsOffsetSec: 0 })
+                            }
+                          >
+                            重設
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <input
+                      id="midi-lyrics-offset"
+                      className="setting-range"
+                      type="range"
+                      min={MIDI_LYRICS_OFFSET_MIN}
+                      max={MIDI_LYRICS_OFFSET_MAX}
+                      step={MIDI_LYRICS_OFFSET_STEP}
+                      value={lyricsOffset}
+                      onChange={(e) =>
+                        updateSongSettings({
+                          lyricsOffsetSec: Number(e.target.value),
+                        })
+                      }
+                    />
+                  </div>
+                </div>
+              );
+            })()}
 
             {sliced && sliced.notes.length === 0 && (
               <p className="midi-notice-warn" role="status">

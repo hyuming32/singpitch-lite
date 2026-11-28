@@ -5,7 +5,16 @@ import {
   loadErrorLogs,
   type ErrorLogEntry,
 } from '../../state/errlog';
-import type { MicInputMode, PracticeSettings } from '../../state/settings';
+import {
+  LYRICS_LEAD_MAX,
+  LYRICS_LEAD_MIN,
+  LYRICS_LEAD_STEP,
+  LYRICS_SCALE_MAX,
+  LYRICS_SCALE_MIN,
+  LYRICS_SCALE_STEP,
+  type MicInputMode,
+  type PracticeSettings,
+} from '../../state/settings';
 import { displayNoteName } from '../noteLabel';
 import {
   useNoiseCalibration,
@@ -525,6 +534,62 @@ export function PracticeSettingsSheet({
                 </div>
               </div>
             ))}
+          </div>
+
+          {/* 7.8 MIDI 歌詞設定 */}
+          <div className="setting-row setting-row-stack">
+            <label className="toggle-item practice-setting-toggle">
+              <span>顯示歌詞</span>
+              <input
+                type="checkbox"
+                checked={settings.lyricsVisible}
+                onChange={(e) =>
+                  onUpdateSettings({ lyricsVisible: e.target.checked })
+                }
+              />
+            </label>
+
+            <div className="setting-row-inline-head">
+              <label className="setting-label" htmlFor="lyrics-scale-range">
+                歌詞大小
+              </label>
+              <span className="setting-value-badge">
+                {settings.lyricsScale}%
+              </span>
+            </div>
+            <input
+              id="lyrics-scale-range"
+              className="setting-range"
+              type="range"
+              min={LYRICS_SCALE_MIN}
+              max={LYRICS_SCALE_MAX}
+              step={LYRICS_SCALE_STEP}
+              value={settings.lyricsScale}
+              onChange={(e) =>
+                onUpdateSettings({ lyricsScale: Number(e.target.value) })
+              }
+            />
+
+            <div className="setting-row-inline-head">
+              <label className="setting-label" htmlFor="lyrics-lead-range">
+                字幕提前
+              </label>
+              <span className="setting-value-badge">
+                {settings.lyricsLeadSec.toFixed(2)} 秒
+              </span>
+            </div>
+            <input
+              id="lyrics-lead-range"
+              className="setting-range"
+              type="range"
+              min={LYRICS_LEAD_MIN}
+              max={LYRICS_LEAD_MAX}
+              step={LYRICS_LEAD_STEP}
+              value={settings.lyricsLeadSec}
+              onChange={(e) =>
+                onUpdateSettings({ lyricsLeadSec: Number(e.target.value) })
+              }
+            />
           </div>
 
           {/* 8. 診斷資訊（可折疊） */}

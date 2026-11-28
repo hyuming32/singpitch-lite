@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { PracticeLogEntry } from '../core/practiceLog';
+import { createLyricsStore } from '../state/lyricsStore';
 import {
   createMidiStore,
   saveMidiSongSettings,
@@ -103,6 +104,7 @@ export function AppShell() {
   const [customNoticeOpen, setCustomNoticeOpen] = useState(false);
   const logStore = useMemo(() => createPracticeLogStore(), []);
   const midiStore = useMemo(() => createMidiStore(), []);
+  const lyricsStore = useMemo(() => createLyricsStore(), []);
   const [practiceSource, setPracticeSource] = useState<'scale' | 'midi'>(() => {
     const sess = readPracticeSession();
     return sess?.mode === 'midi' ? 'midi' : 'scale';
@@ -142,13 +144,15 @@ export function AppShell() {
           entry = await midiStore.get(byHash.id);
         }
       }
-      return entry;
+      if (!entry) return null;
+      const importedLyrics = await lyricsStore.get(entry.id).catch(() => null);
+      return { entry, importedLyrics };
     };
 
     loadMidiEntry()
-      .then((entry) => {
+      .then((loaded) => {
         if (cancelled) return;
-        if (!entry) {
+        if (!loaded) {
           writePracticeSession({ mode: 'scale' });
           setPracticeSource('scale');
           setMidiRestoreNotice('找不到對應的 MIDI 檔案，已返回 MIDI 練唱。');
@@ -156,9 +160,12 @@ export function AppShell() {
           return;
         }
         try {
-          const source = buildMidiSourceFromEntry(entry, sess);
+          const source = buildMidiSourceFromEntry(loaded.entry, sess);
           setMidiRestoreNotice(null);
-          setActiveMidiSource(source);
+          setActiveMidiSource({
+            ...source,
+            importedLyrics: loaded.importedLyrics,
+          });
         } catch {
           writePracticeSession({ mode: 'scale' });
           setPracticeSource('scale');
@@ -178,7 +185,7 @@ export function AppShell() {
     return () => {
       cancelled = true;
     };
-  }, [route, practiceSource, activeMidiSource, midiStore]);
+  }, [route, practiceSource, activeMidiSource, midiStore, lyricsStore]);
 
   useEffect(() => {
     if (!window.location.hash) {
@@ -443,6 +450,8 @@ export function AppShell() {
                 onUpdateSettings={handleUpdateSettings}
                 onStartMidiPractice={handleStartMidiPractice}
                 initialSource={activeMidiSource}
+                store={midiStore}
+                lyricsStore={lyricsStore}
               />
             </>
           )}

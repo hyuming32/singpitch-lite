@@ -103,7 +103,17 @@ export interface PracticeSettings {
   voice: VoiceOption;
   maleClef: MaleClefOption;
   myRange: MyRangeData | null;
+  lyricsVisible: boolean;
+  lyricsScale: number;
+  lyricsLeadSec: number;
 }
+
+export const LYRICS_SCALE_MIN = 70;
+export const LYRICS_SCALE_MAX = 160;
+export const LYRICS_SCALE_STEP = 5;
+export const LYRICS_LEAD_MIN = 0;
+export const LYRICS_LEAD_MAX = 0.5;
+export const LYRICS_LEAD_STEP = 0.05;
 
 export const DEFAULT_SETTINGS: PracticeSettings = {
   patternId: BUILTIN_PATTERNS[0]!.id,
@@ -137,6 +147,9 @@ export const DEFAULT_SETTINGS: PracticeSettings = {
   voice: 'normal',
   maleClef: 'treble8va',
   myRange: null,
+  lyricsVisible: true,
+  lyricsScale: 100,
+  lyricsLeadSec: 0,
 };
 
 export const BPM_MIN = 40;
@@ -191,6 +204,24 @@ export function formatBpm(bpm: number): string {
   }
   const rounded = Math.round(bpm * 10) / 10;
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+}
+
+function clampStep(
+  value: unknown,
+  min: number,
+  max: number,
+  step: number,
+  decimals: number,
+  fallback: number,
+): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return fallback;
+  }
+  const clamped = Math.max(min, Math.min(max, value));
+  const snapped = Math.round(clamped / step) * step;
+  const factor = 10 ** decimals;
+  const rounded = Math.round(snapped * factor) / factor;
+  return Math.max(min, Math.min(max, rounded === 0 ? 0 : rounded));
 }
 
 function clampInt(value: unknown, min: number, max: number, fallback: number): number {
@@ -457,6 +488,26 @@ export function sanitizeSettings(raw: unknown): PracticeSettings {
     voice,
     maleClef,
     myRange,
+    lyricsVisible: validateBoolean(
+      obj.lyricsVisible,
+      DEFAULT_SETTINGS.lyricsVisible,
+    ),
+    lyricsScale: clampStep(
+      obj.lyricsScale,
+      LYRICS_SCALE_MIN,
+      LYRICS_SCALE_MAX,
+      LYRICS_SCALE_STEP,
+      0,
+      DEFAULT_SETTINGS.lyricsScale,
+    ),
+    lyricsLeadSec: clampStep(
+      obj.lyricsLeadSec,
+      LYRICS_LEAD_MIN,
+      LYRICS_LEAD_MAX,
+      LYRICS_LEAD_STEP,
+      2,
+      DEFAULT_SETTINGS.lyricsLeadSec,
+    ),
   };
 }
 

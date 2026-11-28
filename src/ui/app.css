@@ -5448,3 +5448,232 @@ button:disabled {
 .accomp-speaker-hint {
   top: 44px;
 }
+
+/* === MIDI 設定頁歌詞區 === */
+.midi-lyrics-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.midi-lyrics-import-btn {
+  min-height: 36px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--blue);
+  background-color: var(--blue-bg);
+  color: var(--blue-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.midi-lyrics-remove-btn {
+  min-height: 36px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background-color: var(--card);
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.midi-lyrics-offset-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* === 練唱頁卡拉 OK 歌詞帶 === */
+.lyrics-strip {
+  flex-shrink: 0;
+  width: 100%;
+  padding: 2px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  overflow: hidden;
+  border-bottom: 1px solid rgba(44, 44, 42, 0.08);
+  user-select: none;
+}
+
+.lyrics-strip.is-tablet {
+  padding: 4px 20px;
+  gap: 3px;
+}
+
+.lyrics-line {
+  width: 100%;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.25;
+}
+
+.lyrics-line.is-current {
+  font-weight: 700;
+  color: #7b7970;
+}
+
+.lyrics-line.is-next {
+  font-weight: 500;
+  color: #8f8d84;
+}
+
+.lyrics-seg.is-sung {
+  color: #185fa5;
+}
+
+.lyrics-seg.is-unsung {
+  color: #7b7970;
+}
+
+.lyrics-seg.is-singing {
+  background: linear-gradient(
+    90deg,
+    #185fa5 var(--lyric-fill, 0%),
+    #7b7970 var(--lyric-fill, 0%)
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* === MIDI 練唱進度拉桿 === */
+.midi-seek-bar {
+  flex-shrink: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.midi-seek-bar.is-tablet {
+  gap: 12px;
+  padding: 0 8px;
+}
+
+.midi-seek-bars-label,
+.midi-seek-time-label {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.midi-seek-bar.is-tablet .midi-seek-bars-label,
+.midi-seek-bar.is-tablet .midi-seek-time-label {
+  font-size: 13px;
+}
+
+.midi-seek-track-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 80px;
+  min-height: 30px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+  outline: none;
+}
+
+.midi-seek-rail {
+  position: relative;
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background-color: rgba(255, 255, 255, 0.14);
+  overflow: visible;
+}
+
+.midi-seek-bar.is-tablet .midi-seek-rail {
+  height: 7px;
+}
+
+.midi-seek-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  border-radius: 999px;
+  background-color: var(--blue);
+  pointer-events: none;
+}
+
+.midi-seek-lyric-tick {
+  position: absolute;
+  top: -2px;
+  width: 2px;
+  height: 10px;
+  transform: translateX(-50%);
+  border-radius: 1px;
+  background-color: rgba(255, 255, 255, 0.45);
+  pointer-events: none;
+}
+
+.midi-seek-thumb {
+  position: absolute;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background-color: #ffffff;
+  border: 2.5px solid var(--blue);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+.midi-seek-bar.is-tablet .midi-seek-thumb {
+  width: 18px;
+  height: 18px;
+}
+
+.midi-seek-tooltip {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  transform: translateX(-50%);
+  max-width: 240px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background-color: rgba(20, 24, 32, 0.94);
+  color: #f6f4ee;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  z-index: 25;
+}
+
+.midi-seek-tooltip-lyric {
+  font-weight: 500;
+  color: #93c5fd;
+}
+
+.practice-page.has-midi-seek .midi-mixer-popover {
+  bottom: 112px;
+}
+
+.practice-page.is-portrait.has-midi-seek .midi-mixer-popover {
+  bottom: 142px;
+}
+
+.practice-page.is-phone.has-midi-seek .midi-mixer-popover {
+  bottom: 74px;
+}

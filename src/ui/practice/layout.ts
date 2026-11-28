@@ -231,6 +231,7 @@ export function computeStaffMetrics(
   positions: readonly { position: number; endPosition?: number }[],
   height: number,
   isTablet: boolean,
+  extraBottomMargin = 0,
 ): StaffVerticalMetrics {
   // 基準範圍至少涵蓋上下加線各 2 條（pos = -4 音符下緣 -5 至 pos = +12 音符上緣 +13）與高音譜號完整 bbox
   let minPos = -5;
@@ -249,7 +250,7 @@ export function computeStaffMetrics(
 
   // 和弦標記專用上方空間（位於 SVG 頂部，第五線與高音符桿上方）
   const chordLane = isTablet ? 24 : 16;
-  const bottomMargin = isTablet ? 10 : 6;
+  const bottomMargin = (isTablet ? 10 : 6) + Math.max(0, extraBottomMargin);
   const usable = Math.max(18, height - chordLane - bottomMargin);
   const defaultStep = isTablet ? 9 : 7;
   const span = Math.max(18, maxPos - minPos);

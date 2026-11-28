@@ -1,3 +1,5 @@
+import { detectChunksEncoding } from './lyrics';
+
 export interface MidiNote {
   start: number;
   end: number;
@@ -8,6 +10,14 @@ export interface MidiNote {
   startTick?: number;
   /** 原始 MIDI 結束 tick（僅由 parseMidi 解析時填入） */
   endTick?: number;
+}
+
+export interface MidiLyricEvent {
+  tick: number;
+  time: number;
+  track: number;
+  type: 0x05 | 0x01;
+  text: string;
 }
 
 export interface MidiTrack {
@@ -35,6 +45,10 @@ export interface MidiAsset {
   beats: MidiBeat[];
   /** MIDI 拍號事件序列（含起始預設 4/4 與中途變拍號） */
   timeSignatures?: MidiTimeSignatureEvent[];
+  /** MIDI 內嵌歌詞與文字事件（Meta 0x05 / 0x01，已整首判斷編碼並略過 @ 檔頭） */
+  lyrics?: MidiLyricEvent[];
+  /** 內嵌歌詞判斷出的文字編碼 */
+  lyricsEncoding?: string;
 }
 
 export interface TrackInfo {
@@ -107,6 +121,14 @@ type RawEvent =
       type: 'program_change';
       channel: number;
       program: number;
+    }
+  | {
+      tick: number;
+      track: number;
+      order: number;
+      type: 'lyric';
+      metaType: 0x05 | 0x01;
+      data: Uint8Array;
     }
   | {
       tick: number;
@@ -353,6 +375,15 @@ export function parseMidi(data: Uint8Array | ArrayBuffer): MidiAsset {
         const metaData = reader.readBytes(metaLen, chunkEnd);
         if (metaType === 0x03) {
           rawName = utf8Decoder.decode(metaData);
+        } else if (metaType === 0x05 || metaType === 0x01) {
+          events.push({
+            tick,
+            track: trackIndex,
+            order: order++,
+            type: 'lyric',
+            metaType,
+            data: new Uint8Array(metaData),
+          });
         } else if (metaType === 0x51 && metaLen === 3) {
           const tempo =
             (metaData[0]! << 16) | (metaData[1]! << 8) | metaData[2]!;
@@ -477,6 +508,13 @@ export function parseMidi(data: Uint8Array | ArrayBuffer): MidiAsset {
   const trackFirstNoteProgram = new Map<number, number>();
   const trackFirstProgramFallback = new Map<number, number>();
   const timeSignatures: MidiTimeSignatureEvent[] = [];
+  const rawLyrics: Array<{
+    tick: number;
+    time: number;
+    track: number;
+    metaType: 0x05 | 0x01;
+    data: Uint8Array;
+  }> = [];
 
   let now = 0;
   let lastTick = 0;
@@ -595,6 +633,16 @@ export function parseMidi(data: Uint8Array | ArrayBuffer): MidiAsset {
       continue;
     }
     if (ev.type === 'end_of_track') {
+      continue;
+    }
+    if (ev.type === 'lyric') {
+      rawLyrics.push({
+        tick: ev.tick,
+        time: now,
+        track: ev.track,
+        metaType: ev.metaType,
+        data: ev.data,
+      });
       continue;
     }
     if (ev.type === 'program_change') {
@@ -721,12 +769,63 @@ export function parseMidi(data: Uint8Array | ArrayBuffer): MidiAsset {
 
   const beats = buildBeats(events, endTick, ticksPerBeat);
 
+  let lyrics: MidiLyricEvent[] | undefined;
+  let lyricsEncoding: string | undefined;
+  if (rawLyrics.length > 0) {
+    const decodeAll = (
+      items: typeof rawLyrics,
+    ): { encoding: string; decodeChunk: (chunk: Uint8Array) => string } | null => {
+      try {
+        return detectChunksEncoding(items.map((r) => r.data));
+      } catch {
+        return null;
+      }
+    };
+
+    const has05 = rawLyrics.some((r) => r.metaType === 0x05);
+    const detected =
+      decodeAll(rawLyrics) ??
+      (has05 ? decodeAll(rawLyrics.filter((r) => r.metaType === 0x05)) : null);
+
+    if (detected) {
+      lyricsEncoding = detected.encoding;
+      const decodedEvents: MidiLyricEvent[] = [];
+      for (const item of rawLyrics) {
+        let text: string;
+        try {
+          text = detected.decodeChunk(item.data);
+        } catch {
+          continue;
+        }
+        // .kar 慣例：Meta 0x01 以 @ 開頭的是檔頭資訊，略過
+        if (item.metaType === 0x01 && text.trimStart().startsWith('@')) {
+          continue;
+        }
+        if (text.length === 0) {
+          continue;
+        }
+        decodedEvents.push({
+          tick: item.tick,
+          time: item.time,
+          track: item.track,
+          type: item.metaType,
+          text,
+        });
+      }
+      if (decodedEvents.length > 0) {
+        lyrics = decodedEvents;
+      }
+    }
+  }
+
   return {
     tracks,
     duration: now,
     ticksPerBeat,
     beats,
     timeSignatures,
+    ...(lyrics ? { lyrics } : {}),
+    ...(lyricsEncoding ? { lyricsEncoding } : {}),
   };
 }
 

@@ -774,6 +774,68 @@ export function StaffView({
         );
       })}
 
+      {/* MIDI 五線譜音符下方歌詞（跨音畫延長線 —，多字元注音直排疊成一格） */}
+      {midiData?.lyricMarks &&
+        midiData.lyricMarks.marks.map((lm, idx) => {
+          const g = glyphs[lm.glyphIndex];
+          const isCurrentWord = isCurrentLine && lm.glyphIndex === activeIndex;
+          const isPastWord =
+            isCurrentLine &&
+            sec !== undefined &&
+            g !== undefined &&
+            sec >= g.start + g.dur;
+          const lyricY = safeHeight - (isTablet ? 15 : 10.5);
+          const markFontSize = lm.fontSize ?? midiData.lyricMarks!.fontSize;
+          const fill = isCurrentWord
+            ? '#185fa5'
+            : isPastWord
+              ? '#5f5e5a'
+              : '#2c2c2a';
+
+          if (lm.isVerticalStack) {
+            const chars = [...lm.text];
+            const stackSize = Math.max(5.5, markFontSize * 0.62);
+            const firstDy = -(chars.length - 1) * stackSize * 0.95;
+            return (
+              <text
+                key={`lyric-${lm.glyphIndex}-${idx}`}
+                className={`staff-lyric is-vertical ${isCurrentWord ? 'is-current' : isPastWord ? 'is-past' : ''}`}
+                x={lm.x}
+                y={lyricY}
+                textAnchor="middle"
+                fontSize={stackSize}
+                fontWeight={isCurrentWord ? '700' : '600'}
+                fill={fill}
+              >
+                {chars.map((ch, ci) => (
+                  <tspan
+                    key={`ch-${ci}`}
+                    x={lm.x}
+                    dy={ci === 0 ? firstDy : stackSize * 1.02}
+                  >
+                    {ch}
+                  </tspan>
+                ))}
+              </text>
+            );
+          }
+
+          return (
+            <text
+              key={`lyric-${lm.glyphIndex}-${idx}`}
+              className={`staff-lyric ${lm.isExtension ? 'is-ext' : ''} ${isCurrentWord ? 'is-current' : isPastWord ? 'is-past' : ''}`}
+              x={lm.x}
+              y={lyricY}
+              textAnchor="middle"
+              fontSize={markFontSize}
+              fontWeight={isCurrentWord ? '700' : '600'}
+              fill={fill}
+            >
+              {lm.text}
+            </text>
+          );
+        })}
+
       {/* 演唱音高線 */}
       {sungPath && (
         <path

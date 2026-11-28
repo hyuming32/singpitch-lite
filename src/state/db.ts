@@ -1,7 +1,8 @@
 export const SINGPITCH_DB_NAME = 'singpitch-lite';
-export const SINGPITCH_DB_VERSION = 2;
+export const SINGPITCH_DB_VERSION = 3;
 export const MIDI_STORE_NAME = 'midi';
 export const PRACTICE_LOG_STORE_NAME = 'practiceLog';
+export const LYRICS_STORE_NAME = 'lyrics';
 
 /** 開啟共用的 IndexedDB 資料庫並確保所有 object store 皆已建立 */
 export function openSingpitchDb(): Promise<IDBDatabase> {
@@ -14,6 +15,9 @@ export function openSingpitchDb(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(PRACTICE_LOG_STORE_NAME)) {
         db.createObjectStore(PRACTICE_LOG_STORE_NAME, { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains(LYRICS_STORE_NAME)) {
+        db.createObjectStore(LYRICS_STORE_NAME, { keyPath: 'id' });
       }
     };
     req.onsuccess = () => resolve(req.result);

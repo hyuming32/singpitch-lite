@@ -13,6 +13,11 @@ import {
   type KeyBlock,
 } from '../../core/exercise';
 import { keyName, type Key } from '../../core/key';
+import {
+  alignLyricsToStaffLine,
+  buildMidiLyricsDocument,
+  convertLyricsToPassTime,
+} from '../../core/lyrics';
 import { buildMidiExercise } from '../../core/midiExercise';
 import {
   buildMidiMixLayers,
@@ -39,6 +44,7 @@ import {
   type PracticeLogStore,
 } from '../../state/practiceLogStore';
 import {
+  resolveMidiLyricsOffset,
   resolveMidiMixer,
   stripMidiExtension,
   type MidiMixerSettings,
@@ -159,6 +165,8 @@ import {
   exportPracticeScreenshot,
 } from './screenshot';
 import { MidiMixerPopover } from './MidiMixerPopover';
+import { LyricsStrip } from './LyricsStrip';
+import { MidiSeekBar } from './MidiSeekBar';
 import { TransportBar } from './TransportBar';
 
 interface PracticePageProps {
@@ -297,6 +305,10 @@ export function PracticePage({
     keyIndex: number;
     resumePlay: boolean;
   } | null>(null);
+  const pendingSeekGuardRef = useRef<{
+    targetSec: number;
+    expiresAt: number;
+  } | null>(null);
   const suppressLoadPosRef = useRef(false);
   const lastPosRef = useRef<{ sec: number; time: number; playing: boolean }>({
     sec: 0,
@@ -315,6 +327,104 @@ export function PracticePage({
     rotationCtx,
   } = useMemo(() => resolvePracticeViewport(viewport), [viewport]);
 
+  const pattern = useMemo(
+    () =>
+      BUILTIN_PATTERNS.find((p) => p.id === settings.patternId) ??
+      BUILTIN_PATTERNS[0]!,
+    [settings.patternId],
+  );
+  const songTitle = midiSource
+    ? stripMidiExtension(midiSource.name)
+    : pattern.name;
+
+  const voiceDisplay = useMemo(
+    () => resolveVoiceDisplay(settings),
+    [settings.voice, settings.maleClef, settings.rangeName, settings.myRange],
+  );
+  const clef = voiceDisplay.clef;
+  const pitchShift = voiceDisplay.pitchShift;
+  const octaveTag = voiceDisplay.octaveTag;
+
+  const midiBuild = useMemo(() => {
+    if (!midiSource) return null;
+    try {
+      const res = buildMidiExercise(midiSource.asset, {
+        trackIndex: midiSource.songSettings.trackIndex,
+        startBar: midiSource.songSettings.startBar,
+        endBar: midiSource.songSettings.endBar,
+        transposeSemitones: midiSource.songSettings.transposeSemitones,
+        speedPercent: midiSource.songSettings.speedPercent,
+        ...(midiSource.songSettings.manualKey
+          ? { originalKey: midiSource.songSettings.manualKey }
+          : {}),
+        mode:
+          settings.mode === 'listen-then-sing' ? 'listen-then-sing' : 'follow',
+        repeats: repeatsPerKeyToCount(settings.repeatsPerKey),
+        countIn: settings.countIn,
+        displayTranspose: pitchShift,
+      });
+      return { res, error: null as string | null };
+    } catch (err) {
+      return {
+        res: null,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }, [
+    midiSource,
+    settings.mode,
+    settings.repeatsPerKey,
+    settings.countIn,
+    pitchShift,
+  ]);
+
+  const rawSongLyrics = useMemo(() => {
+    if (!midiSource) return null;
+    if (midiSource.importedLyrics?.document) {
+      return midiSource.importedLyrics.document;
+    }
+    const embedded = buildMidiLyricsDocument(
+      midiSource.asset,
+      midiSource.songSettings.trackIndex,
+    );
+    return embedded.lines.length > 0 ? embedded : null;
+  }, [midiSource]);
+
+  const passLyrics = useMemo(() => {
+    if (!rawSongLyrics || !midiSource || !midiBuild?.res) {
+      return null;
+    }
+    const regionStartOrigSec = midiBuild.res.regionStartOrigSec ?? 0;
+    const regionEndOrigSec =
+      midiBuild.res.regionEndOrigSec ?? midiSource.asset.duration;
+    return convertLyricsToPassTime(rawSongLyrics, {
+      offsetSec: resolveMidiLyricsOffset(midiSource.songSettings),
+      regionStartOrigSec,
+      regionEndOrigSec,
+      speedPercent: midiSource.songSettings.speedPercent,
+    });
+  }, [rawSongLyrics, midiSource, midiBuild]);
+
+  const hasLyrics = isMidiMode && Boolean(passLyrics && passLyrics.lines.length > 0);
+  const showLyrics = hasLyrics && settings.lyricsVisible;
+  const lyricsTwoLines = isTablet || isPortrait || layoutHeight >= 460;
+  const lyricsScaleFactor = Math.max(0.7, Math.min(1.6, settings.lyricsScale / 100));
+  const lyricsFontPx = (isTablet ? 17 : 13) * lyricsScaleFactor;
+  const lyricsBandHeight = showLyrics
+    ? lyricsTwoLines
+      ? Math.round(lyricsFontPx * 2.75 + 8)
+      : Math.round(lyricsFontPx * 1.45 + 6)
+    : 0;
+  const seekBarHeight =
+    isMidiMode && midiBuild?.res && midiBuild.res.scoreBars.length > 0
+      ? isTablet
+        ? 40
+        : 34
+      : 0;
+  const staffLyricBottomPad = showLyrics
+    ? Math.round((isTablet ? 12 : 10) * lyricsScaleFactor + (isTablet ? 18 : 13))
+    : 0;
+
   const autoLayout = isPortrait
     ? computePortraitLayout(
         layoutWidth,
@@ -323,6 +433,8 @@ export function PracticePage({
         {
           collapsedPref: 'auto',
           preferredPianoHeight: settings.pianoHeight,
+          extraChromeHeight: seekBarHeight,
+          lyricsBandHeight,
         },
       )
     : computeViewportLayout({
@@ -333,6 +445,8 @@ export function PracticePage({
         preferredPianoHeight: settings.pianoHeight,
         safePaddingY: safePadding?.y,
         safePaddingX: safePadding?.x,
+        extraChromeHeight: seekBarHeight,
+        lyricsBandHeight,
       });
 
   useEffect(() => {
@@ -391,57 +505,6 @@ export function PracticePage({
     if (scoreEl) ro.observe(scoreEl);
     return () => ro.disconnect();
   }, [isPortrait, layoutWidth, layoutHeight]);
-
-  const pattern = useMemo(
-    () =>
-      BUILTIN_PATTERNS.find((p) => p.id === settings.patternId) ??
-      BUILTIN_PATTERNS[0]!,
-    [settings.patternId],
-  );
-  const songTitle = midiSource
-    ? stripMidiExtension(midiSource.name)
-    : pattern.name;
-
-  const voiceDisplay = useMemo(
-    () => resolveVoiceDisplay(settings),
-    [settings.voice, settings.maleClef, settings.rangeName, settings.myRange],
-  );
-  const clef = voiceDisplay.clef;
-  const pitchShift = voiceDisplay.pitchShift;
-  const octaveTag = voiceDisplay.octaveTag;
-
-  const midiBuild = useMemo(() => {
-    if (!midiSource) return null;
-    try {
-      const res = buildMidiExercise(midiSource.asset, {
-        trackIndex: midiSource.songSettings.trackIndex,
-        startBar: midiSource.songSettings.startBar,
-        endBar: midiSource.songSettings.endBar,
-        transposeSemitones: midiSource.songSettings.transposeSemitones,
-        speedPercent: midiSource.songSettings.speedPercent,
-        ...(midiSource.songSettings.manualKey
-          ? { originalKey: midiSource.songSettings.manualKey }
-          : {}),
-        mode:
-          settings.mode === 'listen-then-sing' ? 'listen-then-sing' : 'follow',
-        repeats: repeatsPerKeyToCount(settings.repeatsPerKey),
-        countIn: settings.countIn,
-        displayTranspose: pitchShift,
-      });
-      return { res, error: null as string | null };
-    } catch (err) {
-      return {
-        res: null,
-        error: err instanceof Error ? err.message : String(err),
-      };
-    }
-  }, [
-    midiSource,
-    settings.mode,
-    settings.repeatsPerKey,
-    settings.countIn,
-    pitchShift,
-  ]);
 
   const midiMixer = useMemo(
     () => resolveMidiMixer(midiSource?.songSettings),
@@ -726,6 +789,15 @@ export function PracticePage({
         return;
       }
       suppressLoadPosRef.current = false;
+
+      const guard = pendingSeekGuardRef.current;
+      if (guard) {
+        if (performance.now() > guard.expiresAt || Math.abs(s - guard.targetSec) <= 0.5) {
+          pendingSeekGuardRef.current = null;
+        } else {
+          return;
+        }
+      }
 
       const nowMs = Date.now();
       const ex = exerciseRef.current;
@@ -1565,23 +1637,37 @@ export function PracticePage({
     if (!exercise || midiPages.length === 0) return;
     const clampedIdx = Math.max(0, Math.min(midiPages.length - 1, pageIdx));
     const targetSec = midiPages[clampedIdx]?.start ?? 0;
-    rawSungRef.current = rawSungRef.current.filter((p) => p.t < targetSec);
+    handleMidiSeek(targetSec);
+  }
+
+  function handleMidiSeek(targetAbsSec: number) {
+    if (!exercise) return;
+    const clampedSec = Math.max(0, Math.min(exercise.total, targetAbsSec));
+    if (playingRef.current) {
+      pendingSeekGuardRef.current = {
+        targetSec: clampedSec,
+        expiresAt: performance.now() + 300,
+      };
+    }
+    rawSungRef.current = rawSungRef.current.filter((p) => p.t < clampedSec);
     lastEvaluatedShadowPassRef.current = null;
     voiceGateRef.current.reset();
     setSungVersion((v) => v + 1);
     lastPosRef.current = {
-      sec: targetSec,
+      sec: clampedSec,
       time: performance.now(),
-      playing,
+      playing: playingRef.current,
     };
-    setSec(targetSec);
+    setSec(clampedSec);
     if (logSessionRef.current) {
       logSessionRef.current = syncSessionPlayhead(
         logSessionRef.current,
-        targetSec,
+        clampedSec,
       );
     }
-    engine.seek(targetSec);
+    if (engine.audioContext) {
+      engine.seek(clampedSec);
+    }
   }
 
   function handlePrevKey() {
@@ -1761,6 +1847,8 @@ export function PracticePage({
           collapsedPref,
           preferredPianoHeight: settings.pianoHeight,
           overridePianoHeight: dragHeight,
+          extraChromeHeight: seekBarHeight,
+          lyricsBandHeight,
         },
       )
     : null;
@@ -1775,6 +1863,8 @@ export function PracticePage({
       overridePianoHeight: dragHeight,
       safePaddingY: safePadding?.y,
       safePaddingX: safePadding?.x,
+      extraChromeHeight: seekBarHeight,
+      lyricsBandHeight,
     });
 
   const handleH = vpLayout.handleHeight;
@@ -2039,6 +2129,19 @@ export function PracticePage({
     () => (exercise ? listPassWindows(exercise) : []),
     [exercise],
   );
+  const activePassWin = useMemo(() => {
+    if (passWindows.length === 0) return null;
+    if (sec < passWindows[0]!.start) return passWindows[0]!;
+    return (
+      passWindows.find((w) => sec >= w.start && sec < w.end) ??
+      passWindows[passWindows.length - 1]!
+    );
+  }, [passWindows, sec]);
+  const activePassStart = activePassWin?.start ?? exercise?.keys[0]?.start ?? 0;
+  const totalPassDur =
+    midiScoreBars.length > 0
+      ? Math.max(0.05, midiScoreBars[midiScoreBars.length - 1]!.endSec)
+      : 0;
 
   let targetMidi: number | null = null;
   const renderedLines = lines.map((line) => {
@@ -2065,7 +2168,12 @@ export function PracticePage({
           }
         }
       }
-      metrics = computeStaffMetrics(positions, staffHeight, isTablet);
+      metrics = computeStaffMetrics(
+        positions,
+        staffHeight,
+        isTablet,
+        staffLyricBottomPad,
+      );
       const passWin = passWindows.find(
         (w) =>
           w.keyIndex === midiLine.keyIndex &&
@@ -2086,6 +2194,16 @@ export function PracticePage({
       });
       glyphs = built.glyphs;
       midiData = built.renderData;
+      if (showLyrics && passLyrics) {
+        midiData.lyricMarks = alignLyricsToStaffLine({
+          glyphs,
+          bars: midiLine.page.bars,
+          passStartSec,
+          passLyrics: passLyrics.lines,
+          lyricsScale: settings.lyricsScale,
+          isTablet,
+        });
+      }
       leftPad = midiData.leftPad;
 
       const showPlayhead =
@@ -2486,7 +2604,7 @@ export function PracticePage({
   return (
     <div
       ref={pageRef}
-      className={`practice-page ${isTablet ? 'is-tablet' : isPortrait ? 'is-portrait' : 'is-phone'}`}
+      className={`practice-page ${isTablet ? 'is-tablet' : isPortrait ? 'is-portrait' : 'is-phone'} ${seekBarHeight > 0 ? 'has-midi-seek' : ''}`}
       style={{
         width: `${vpLayout.viewportWidth}px`,
         height: `${vpLayout.viewportHeight}px`,
@@ -2746,6 +2864,18 @@ export function PracticePage({
             </div>
           )}
 
+          {showLyrics && passLyrics && (
+            <LyricsStrip
+              lines={passLyrics.lines}
+              passSec={Math.max(0, sec - activePassStart)}
+              leadSec={settings.lyricsLeadSec}
+              lyricsScale={settings.lyricsScale}
+              twoLines={lyricsTwoLines}
+              isTablet={isTablet}
+              height={lyricsBandHeight}
+            />
+          )}
+
           <div
             className="sheet-score-area"
             ref={scoreAreaRef}
@@ -2864,7 +2994,21 @@ export function PracticePage({
         />
       </div>
 
-      {/* 4. 播放列 + MIDI 混音器 */}
+      {/* 4. MIDI 進度拉桿 + 播放列 + MIDI 混音器 */}
+      {isMidiMode && exercise && midiScoreBars.length > 0 && midiSource && (
+        <MidiSeekBar
+          scoreBars={midiScoreBars}
+          startBar={midiSource.songSettings.startBar}
+          endBar={midiSource.songSettings.endBar}
+          activePassStart={activePassStart}
+          totalPassDur={totalPassDur}
+          sec={sec}
+          passLyrics={showLyrics && passLyrics ? passLyrics.lines : []}
+          isTablet={isTablet}
+          height={seekBarHeight}
+          onSeek={handleMidiSeek}
+        />
+      )}
       {isMidiMode && (
         <MidiMixerPopover
           open={mixerOpen}

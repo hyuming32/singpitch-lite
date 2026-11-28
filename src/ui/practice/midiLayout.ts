@@ -1,6 +1,7 @@
 import type { Exercise } from '../../core/exercise';
 import { keyName, type Key } from '../../core/key';
 import type { JianpuAccidental } from '../../core/jianpu';
+import type { StaffLyricLayout } from '../../core/lyrics';
 import type { MidiScoreBar, MidiScoreEvent, NoteDurationType } from '../../core/midiScore';
 import { staffPosition, type Clef } from '../../core/staff';
 import {
@@ -112,6 +113,8 @@ export interface MidiLineRenderData {
   beamGroups: MidiBeamGroup[];
   jianpuMarkers: MidiJianpuMarker[];
   jianpuUnderlineSegments: MidiJianpuUnderlineSegment[];
+  /** 五線譜音符下方的歌詞對齊標記（有歌詞且顯示歌詞時填入） */
+  lyricMarks?: StaffLyricLayout;
 }
 
 function minEventSixteenths(bar: MidiScoreBar): number {

@@ -55,6 +55,8 @@ export interface MidiSongSettings {
   trackRoles?: Record<number, MidiTrackRole>;
   /** 混音器三組開關與音量（0–100） */
   mixer?: MidiMixerSettings;
+  /** 每首字幕時間位移（−10～+10 秒，每 0.05 秒一格） */
+  lyricsOffsetSec?: number;
 }
 
 /** 計算位元組陣列的 FNV-1a 32 位元十六進位雜湊值 */
@@ -336,6 +338,29 @@ export function resolveMidiMixer(
   return { ...settings.mixer };
 }
 
+export const MIDI_LYRICS_OFFSET_MIN = -10;
+export const MIDI_LYRICS_OFFSET_MAX = 10;
+export const MIDI_LYRICS_OFFSET_STEP = 0.05;
+
+function sanitizeLyricsOffset(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return undefined;
+  }
+  const clamped = Math.max(
+    MIDI_LYRICS_OFFSET_MIN,
+    Math.min(MIDI_LYRICS_OFFSET_MAX, value),
+  );
+  const snapped = Math.round(clamped * 20) / 20;
+  return snapped === 0 ? 0 : snapped;
+}
+
+/** 取得每首 MIDI 的字幕時間位移（舊資料無欄位時回傳 0） */
+export function resolveMidiLyricsOffset(
+  settings?: Pick<MidiSongSettings, 'lyricsOffsetSec'> | null,
+): number {
+  return settings?.lyricsOffsetSec ?? 0;
+}
+
 /** 驗證並正規化單首 MIDI 設定 */
 export function sanitizeMidiSongSettings(raw: unknown): MidiSongSettings | null {
   if (!raw || typeof raw !== 'object') {
@@ -367,6 +392,7 @@ export function sanitizeMidiSongSettings(raw: unknown): MidiSongSettings | null 
   const trackIndex = Math.max(0, Math.round(obj.trackIndex));
   const trackRoles = sanitizeTrackRoles(obj.trackRoles, trackIndex);
   const mixer = sanitizeMidiMixer(obj.mixer);
+  const lyricsOffsetSec = sanitizeLyricsOffset(obj.lyricsOffsetSec);
 
   return {
     trackIndex,
@@ -377,6 +403,7 @@ export function sanitizeMidiSongSettings(raw: unknown): MidiSongSettings | null 
     manualKey: sanitizeKey(obj.manualKey),
     ...(trackRoles ? { trackRoles } : {}),
     ...(mixer ? { mixer } : {}),
+    ...(lyricsOffsetSec !== undefined ? { lyricsOffsetSec } : {}),
   };
 }
 

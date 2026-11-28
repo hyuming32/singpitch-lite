@@ -90,7 +90,7 @@ describe('MIDI 每首設定存取（localStorage）', () => {
       startBar: 3,
       endBar: 8,
       transposeSemitones: -4,
-      speedPercent: 85,
+      speedPercent: 85.4701,
       manualKey: { tonicPc: 7, mode: 'major' },
     };
     saveMidiSongSettings(hash, cfg, storage);

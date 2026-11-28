@@ -411,7 +411,7 @@ export function sanitizeMidiSongSettings(raw: unknown): MidiSongSettings | null 
       : 0;
   const speedRaw =
     typeof obj.speedPercent === 'number' && Number.isFinite(obj.speedPercent)
-      ? Math.round(obj.speedPercent / 5) * 5
+      ? Math.round(obj.speedPercent * 10000) / 10000
       : 100;
   const trackIndex = Math.max(0, Math.round(obj.trackIndex));
   const trackRoles = sanitizeTrackRoles(obj.trackRoles, trackIndex);

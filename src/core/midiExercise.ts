@@ -506,7 +506,7 @@ export function buildMidiExercise(
   );
   const speedPercent = Math.max(
     50,
-    Math.min(150, Math.round(opts.speedPercent ?? 100)),
+    Math.min(150, sanitizeSpeedValue(opts.speedPercent)),
   );
   const speedFactor = speedPercent / 100;
   const displayTranspose = Math.round(opts.displayTranspose ?? 0);
@@ -611,4 +611,9 @@ export function buildMidiExercise(
     regionStartOrigSec: sliced.regionStart,
     regionEndOrigSec: sliced.regionEnd,
   };
+}
+
+/** 速度百分比允許小數（MIDI 以 BPM 0.1 精度調整），非有限值回傳 100 */
+function sanitizeSpeedValue(value: number | undefined): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 100;
 }

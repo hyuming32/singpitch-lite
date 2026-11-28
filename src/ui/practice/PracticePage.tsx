@@ -1628,12 +1628,11 @@ export function PracticePage({
     if (!midiSource || !midiBuild?.res || !onUpdateMidiSongSettings) return;
     const prevBpm = midiBuild.res.effectiveBpm;
     const baseBpm = midiBuild.res.baseBpm;
-    const nextSpeed = Math.max(
-      50,
-      Math.min(150, Math.round(nextSpeedRaw / 5) * 5),
-    );
-    if (nextSpeed === midiSource.songSettings.speedPercent) return;
-    const nextBpm = Math.round(baseBpm * (nextSpeed / 100) * 10) / 10;
+    // 速度以 BPM 0.1 精度換算回百分比（與音階練唱相同：±1 BPM、可輸入小數）
+    const clampedSpeed = Math.max(50, Math.min(150, nextSpeedRaw));
+    const nextBpm = Math.round(baseBpm * (clampedSpeed / 100) * 10) / 10;
+    if (nextBpm === prevBpm) return;
+    const nextSpeed = Math.round((nextBpm / baseBpm) * 100 * 10000) / 10000;
     const currentSec = getExtrapolatedSec();
     const scaledSec = rescaleTime(currentSec, prevBpm, nextBpm);
     const isPlaying = playingRef.current;
@@ -1653,7 +1652,7 @@ export function PracticePage({
 
   function applyBpmChange(nextRaw: number) {
     if (isMidiMode && midiBuild?.res) {
-      const nextSpeed = (nextRaw / midiBuild.res.baseBpm) * 100;
+      const nextSpeed = (clampBpm(nextRaw) / midiBuild.res.baseBpm) * 100;
       applyMidiSpeedChange(nextSpeed);
       return;
     }
@@ -1677,8 +1676,8 @@ export function PracticePage({
   }
 
   function handleBpmStep(delta: -1 | 1) {
-    if (isMidiMode && midiSource) {
-      applyMidiSpeedChange(midiSource.songSettings.speedPercent + delta * 5);
+    if (isMidiMode && midiBuild?.res) {
+      applyBpmChange(stepBpm(midiBuild.res.effectiveBpm, delta));
       return;
     }
     applyBpmChange(stepBpm(settingsRef.current.bpm, delta));

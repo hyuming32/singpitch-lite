@@ -958,8 +958,8 @@ export function MidiPage({
                   變速
                 </label>
                 <span className="setting-value-badge">
-                  {songSettings.speedPercent}% · {formatBpm(effectiveBpm)} BPM
-                  {songSettings.speedPercent !== 100
+                  {Math.round(songSettings.speedPercent)}% · {formatBpm(effectiveBpm)} BPM
+                  {Math.abs(songSettings.speedPercent - 100) > 1e-6
                     ? `（原速 ${formatBpm(baseBpm)}）`
                     : ''}
                 </span>
@@ -972,7 +972,7 @@ export function MidiPage({
                   disabled={songSettings.speedPercent <= 50}
                   onClick={() =>
                     updateSongSettings({
-                      speedPercent: Math.max(50, songSettings.speedPercent - 5),
+                      speedPercent: Math.max(50, Math.round(songSettings.speedPercent / 5) * 5 - 5),
                     })
                   }
                 >
@@ -997,7 +997,7 @@ export function MidiPage({
                   disabled={songSettings.speedPercent >= 150}
                   onClick={() =>
                     updateSongSettings({
-                      speedPercent: Math.min(150, songSettings.speedPercent + 5),
+                      speedPercent: Math.min(150, Math.round(songSettings.speedPercent / 5) * 5 + 5),
                     })
                   }
                 >

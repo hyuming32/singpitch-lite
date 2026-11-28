@@ -148,6 +148,18 @@ describe('buildMidiExercise', () => {
 
     // 預備拍 4 拍（50 BPM -> 每拍 1.2 秒）
     expect(exercise.clicks).toHaveLength(4);
+
+    // 速度百分比可為小數：100 BPM × 72.5% = 72.5 BPM（與音階練唱一樣 0.1 精度）
+    const resDecimal = buildMidiExercise(asset, {
+      trackIndex: 0,
+      startBar: 1,
+      endBar: 1,
+      speedPercent: 72.5,
+      mode: 'follow',
+      repeats: 1,
+      countIn: true,
+    });
+    expect(resDecimal.effectiveBpm).toBe(72.5);
     expect(exercise.clicks[0]).toEqual({ t: 0, accent: true });
     expect(exercise.clicks[1]!.t).toBeCloseTo(1.2, 5);
     expect(exercise.clicks[1]!.accent).toBe(false);

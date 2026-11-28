@@ -1,3 +1,4 @@
+import { accidentalSymbol, spell, type Key } from '../core/key';
 import { noteName } from '../core/notes';
 
 export interface DisplayNoteOptions {
@@ -14,4 +15,12 @@ export function displayNoteName(
   _options?: DisplayNoteOptions,
 ): string {
   return noteName(midi);
+}
+
+/** 依指定調性拼寫顯示用音名（例如 E♭ 大調中的 MIDI 46 顯示為 B♭2） */
+export function displayNoteNameInKey(midi: number, key: Key): string {
+  const spelled = spell(midi, key);
+  const acc =
+    spelled.accidental === 0 ? '' : accidentalSymbol(spelled.accidental);
+  return `${spelled.letter}${acc}${spelled.octave}`;
 }

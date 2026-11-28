@@ -724,6 +724,159 @@ export function scoreLinesPortrait(
   return result;
 }
 
+export interface MidiScorePage {
+  keyIndex: number;
+  pass: number;
+  phase: 'listen' | 'sing';
+  noteRange: readonly [number, number];
+  start: number;
+  end: number;
+  pageIndex: number;
+  totalPages: number;
+}
+
+/** 依可用寬度計算 MIDI 每頁最多容納的音符數（確保每個音至少約 18–22 px） */
+export function midiMaxNotesPerPage(availableWidth: number): number {
+  const safeW = Number.isFinite(availableWidth) ? Math.max(120, availableWidth) : 600;
+  return Math.max(4, Math.min(16, Math.floor(safeW / 22)));
+}
+
+/** 將 MIDI Exercise 的各遍旋律依寬度切分為時間連續的樂譜頁 */
+export function buildMidiScorePages(
+  ex: Exercise,
+  availableWidth: number,
+): MidiScorePage[] {
+  const windows = listPassWindows(ex);
+  if (windows.length === 0) {
+    return [];
+  }
+
+  const maxPerPage = midiMaxNotesPerPage(availableWidth);
+  const rawPages: Omit<MidiScorePage, 'pageIndex' | 'totalPages'>[] = [];
+
+  for (const w of windows) {
+    const winNotes = ex.notes.filter(
+      (n) =>
+        n.keyIndex === w.keyIndex && n.pass === w.pass && n.phase === w.phase,
+    );
+    if (winNotes.length === 0) {
+      rawPages.push({
+        keyIndex: w.keyIndex,
+        pass: w.pass,
+        phase: w.phase,
+        noteRange: [0, 0],
+        start: w.start,
+        end: w.end,
+      });
+      continue;
+    }
+
+    const numPages = Math.max(1, Math.ceil(winNotes.length / maxPerPage));
+    const baseSize = Math.floor(winNotes.length / numPages);
+    const rem = winNotes.length % numPages;
+
+    let offset = 0;
+    let cursorTime = w.start;
+    for (let i = 0; i < numPages; i++) {
+      const count = baseSize + (i < rem ? 1 : 0);
+      const startIdx = offset;
+      const endIdx = offset + count;
+      const pageStart = cursorTime;
+      let pageEnd: number;
+      if (i === numPages - 1) {
+        pageEnd = Math.max(pageStart + 0.01, w.end);
+      } else {
+        const nextNote = winNotes[endIdx];
+        pageEnd = Math.max(
+          pageStart + 0.01,
+          nextNote ? nextNote.start : pageStart + 0.01,
+        );
+      }
+      rawPages.push({
+        keyIndex: w.keyIndex,
+        pass: w.pass,
+        phase: w.phase,
+        noteRange: [startIdx, endIdx],
+        start: pageStart,
+        end: pageEnd,
+      });
+      offset = endIdx;
+      cursorTime = pageEnd;
+    }
+  }
+
+  const totalPages = rawPages.length;
+  return rawPages.map((p, pageIndex) => ({
+    ...p,
+    pageIndex,
+    totalPages,
+  }));
+}
+
+/** 依目前播放秒數找出對應的 MIDI 樂譜頁碼（0 起算） */
+export function midiPageIndexAtTime(
+  pages: readonly MidiScorePage[],
+  sec: number,
+): number {
+  if (pages.length === 0) {
+    return 0;
+  }
+  if (sec < pages[0]!.start) {
+    return 0;
+  }
+  for (let i = 0; i < pages.length; i++) {
+    const p = pages[i]!;
+    if (sec >= p.start && sec < p.end) {
+      return i;
+    }
+  }
+  return pages.length - 1;
+}
+
+/** 規劃 MIDI 練唱的樂譜顯示行（目前頁＋後續預覽頁，隨播放自動換頁） */
+export function midiScoreLines(
+  ex: Exercise,
+  sec: number,
+  maxLines: number,
+  availableWidth: number,
+): ScoreLine[] {
+  const pages = buildMidiScorePages(ex, availableWidth);
+  if (pages.length === 0) {
+    return [];
+  }
+
+  const activeIdx = midiPageIndexAtTime(pages, sec);
+  const count = Math.max(1, Math.min(maxLines, pages.length - activeIdx));
+  const lines: ScoreLine[] = [];
+
+  for (let i = 0; i < count; i++) {
+    const page = pages[activeIdx + i]!;
+    const isCurrent = i === 0;
+    const prevPage = activeIdx + i > 0 ? pages[activeIdx + i - 1]! : null;
+    const isSamePassContinuation =
+      prevPage !== null &&
+      prevPage.keyIndex === page.keyIndex &&
+      prevPage.pass === page.pass &&
+      prevPage.phase === page.phase;
+    lines.push({
+      keyIndex: page.keyIndex,
+      pass: page.pass,
+      phase: page.phase,
+      noteRange: page.noteRange,
+      start: page.start,
+      end: page.end,
+      isCurrent,
+      label: isCurrent
+        ? null
+        : `第 ${page.pageIndex + 1}/${page.totalPages} 頁`,
+      isSamePassContinuation,
+      isPreview: !isCurrent,
+    });
+  }
+
+  return lines;
+}
+
 /** 依新舊 BPM 等比換算播放秒數（以拍為單位維持相同位置） */
 export function rescaleTime(
   sec: number,

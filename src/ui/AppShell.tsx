@@ -1,15 +1,72 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { PracticeLogEntry } from '../core/practiceLog';
+import {
+  createMidiStore,
+  saveMidiSongSettings,
+  type MidiSongSettings,
+} from '../state/midiLibrary';
+import { createPracticeLogStore } from '../state/practiceLogStore';
 import {
   loadSettings,
   saveSettings,
   type PracticeSettings,
 } from '../state/settings';
 import { AudioProvider } from './AudioContext';
+import {
+  buildMidiSourceFromEntry,
+  buildPracticePageKey,
+  shouldRestoreMidiPractice,
+  type ActivePracticeSession,
+  type AppRoute,
+} from './appPracticeState';
 import { ErrorBoundary } from './ErrorBoundary';
+import { PracticeLogPage } from './log/PracticeLogPage';
+import { MidiPage, type MidiPracticeSource } from './midi/MidiPage';
 import { PatternMenu } from './PatternMenu';
 import { PracticePage } from './practice/PracticePage';
 
-type AppRoute = 'scale' | 'practice' | 'midi' | 'log';
+const ACTIVE_PRACTICE_SESSION_KEY = 'singpitch-lite.active-practice.v1';
+
+function readPracticeSession(): ActivePracticeSession | null {
+  try {
+    if (typeof sessionStorage === 'undefined') return null;
+    const raw = sessionStorage.getItem(ACTIVE_PRACTICE_SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<ActivePracticeSession>;
+    if (parsed.mode === 'midi' && typeof parsed.id === 'string') {
+      return {
+        mode: 'midi',
+        id: parsed.id,
+        ...(typeof parsed.hash === 'string' ? { hash: parsed.hash } : {}),
+        ...(typeof parsed.startBar === 'number'
+          ? { startBar: parsed.startBar }
+          : {}),
+        ...(typeof parsed.endBar === 'number'
+          ? { endBar: parsed.endBar }
+          : {}),
+      };
+    }
+    if (parsed.mode === 'scale') {
+      return { mode: 'scale' };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function writePracticeSession(session: ActivePracticeSession): void {
+  try {
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.setItem(
+        ACTIVE_PRACTICE_SESSION_KEY,
+        JSON.stringify(session),
+      );
+    }
+  } catch {
+    // 忽略 sessionStorage 存取錯誤
+  }
+}
 
 function parseHashRoute(hash: string): AppRoute {
   const cleaned = hash.replace(/^#/, '');
@@ -40,7 +97,88 @@ export function AppShell() {
   );
   const [settings, setSettings] = useState<PracticeSettings>(() => loadSettings());
   const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
+  const [clearLogStep, setClearLogStep] = useState<0 | 1 | 2>(0);
+  const [clearLogNotice, setClearLogNotice] = useState(false);
+  const [logReloadToken, setLogReloadToken] = useState(0);
   const [customNoticeOpen, setCustomNoticeOpen] = useState(false);
+  const logStore = useMemo(() => createPracticeLogStore(), []);
+  const midiStore = useMemo(() => createMidiStore(), []);
+  const [practiceSource, setPracticeSource] = useState<'scale' | 'midi'>(() => {
+    const sess = readPracticeSession();
+    return sess?.mode === 'midi' ? 'midi' : 'scale';
+  });
+  const [activeMidiSource, setActiveMidiSource] =
+    useState<MidiPracticeSource | null>(null);
+  const [practiceMountSeq, setPracticeMountSeq] = useState(0);
+  const [midiRestoreNotice, setMidiRestoreNotice] = useState<string | null>(null);
+
+  const currentSession = readPracticeSession();
+  const restoringMidi = shouldRestoreMidiPractice({
+    route,
+    practiceSource,
+    activeMidiSource,
+    session: currentSession,
+  });
+
+  // 進入 #/practice（含重新整理與紀錄頁「再練一次」）時，若為 MIDI 練唱則從 IndexedDB 載回
+  useEffect(() => {
+    if (route !== 'practice' || practiceSource !== 'midi' || activeMidiSource !== null) {
+      return;
+    }
+    const sess = readPracticeSession();
+    if (!sess || sess.mode !== 'midi' || !sess.id) {
+      setPracticeSource('scale');
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadMidiEntry = async () => {
+      let entry = await midiStore.get(sess.id!);
+      if (!entry && sess.hash) {
+        const list = await midiStore.list();
+        const byHash = list.find((m) => m.hash === sess.hash);
+        if (byHash) {
+          entry = await midiStore.get(byHash.id);
+        }
+      }
+      return entry;
+    };
+
+    loadMidiEntry()
+      .then((entry) => {
+        if (cancelled) return;
+        if (!entry) {
+          writePracticeSession({ mode: 'scale' });
+          setPracticeSource('scale');
+          setMidiRestoreNotice('找不到對應的 MIDI 檔案，已返回 MIDI 練唱。');
+          navigateTo('midi');
+          return;
+        }
+        try {
+          const source = buildMidiSourceFromEntry(entry, sess);
+          setMidiRestoreNotice(null);
+          setActiveMidiSource(source);
+        } catch {
+          writePracticeSession({ mode: 'scale' });
+          setPracticeSource('scale');
+          setMidiRestoreNotice('載入 MIDI 檔案失敗，已返回 MIDI 練唱。');
+          navigateTo('midi');
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          writePracticeSession({ mode: 'scale' });
+          setPracticeSource('scale');
+          setMidiRestoreNotice('載入 MIDI 檔案失敗，已返回 MIDI 練唱。');
+          navigateTo('midi');
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [route, practiceSource, activeMidiSource, midiStore]);
 
   useEffect(() => {
     if (!window.location.hash) {
@@ -68,15 +206,102 @@ export function AppShell() {
     }, 2400);
   }, []);
 
+  const handleStartMidiPractice = useCallback((source: MidiPracticeSource) => {
+    setMidiRestoreNotice(null);
+    setActiveMidiSource(source);
+    setPracticeSource('midi');
+    setPracticeMountSeq((n) => n + 1);
+    writePracticeSession({
+      mode: 'midi',
+      id: source.id,
+      hash: source.hash,
+      startBar: source.songSettings.startBar,
+      endBar: source.songSettings.endBar,
+    });
+    navigateTo('practice');
+  }, []);
+
+  const handleReplayLogEntry = useCallback(
+    (entry: PracticeLogEntry) => {
+      if (entry.source.kind === 'scale') {
+        handleUpdateSettings({
+          patternId: entry.source.patternId,
+          mode: entry.mode,
+        });
+        setActiveMidiSource(null);
+        setPracticeSource('scale');
+        setPracticeMountSeq((n) => n + 1);
+        writePracticeSession({ mode: 'scale' });
+        navigateTo('practice');
+        return;
+      }
+
+      handleUpdateSettings({ mode: entry.mode });
+      setMidiRestoreNotice(null);
+      setActiveMidiSource(null);
+      setPracticeSource('midi');
+      setPracticeMountSeq((n) => n + 1);
+      writePracticeSession({
+        mode: 'midi',
+        id: entry.source.midiId,
+        hash: entry.source.midiHash,
+        startBar: entry.source.startBar,
+        endBar: entry.source.endBar,
+      });
+      navigateTo('practice');
+    },
+    [handleUpdateSettings],
+  );
+
+  const handleUpdateMidiSongSettings = useCallback(
+    (hash: string, next: MidiSongSettings) => {
+      saveMidiSongSettings(hash, next);
+      setActiveMidiSource((prev) => {
+        if (!prev || prev.hash !== hash) return prev;
+        writePracticeSession({
+          mode: 'midi',
+          id: prev.id,
+          startBar: next.startBar,
+          endBar: next.endBar,
+        });
+        return { ...prev, songSettings: next };
+      });
+    },
+    [],
+  );
+
   if (route === 'practice') {
+    if (restoringMidi) {
+      return (
+        <AudioProvider>
+          <div className="app-shell is-practice">
+            <div className="practice-loading-state" role="status">
+              載入中…
+            </div>
+          </div>
+        </AudioProvider>
+      );
+    }
+    const isMidiPractice =
+      practiceSource === 'midi' && activeMidiSource !== null;
+    const practicePageKey = buildPracticePageKey({
+      mountSeq: practiceMountSeq,
+      practiceSource,
+      midiSource: isMidiPractice ? activeMidiSource : null,
+      patternId: settings.patternId,
+    });
     return (
       <AudioProvider>
         <div className="app-shell is-practice">
           <ErrorBoundary label="PracticePage">
             <PracticePage
+              key={practicePageKey}
               settings={settings}
               onUpdateSettings={handleUpdateSettings}
-              onBack={() => navigateTo('scale')}
+              midiSource={isMidiPractice ? activeMidiSource : null}
+              onUpdateMidiSongSettings={handleUpdateMidiSongSettings}
+              practiceLogStore={logStore}
+              onBack={() => navigateTo(isMidiPractice ? 'midi' : 'scale')}
             />
           </ErrorBoundary>
         </div>
@@ -167,6 +392,16 @@ export function AppShell() {
                 ＋
               </button>
             )}
+            {route === 'log' && (
+              <button
+                type="button"
+                className="gear-btn"
+                aria-label="設定"
+                onClick={() => setGlobalSettingsOpen(true)}
+              >
+                ⚙
+              </button>
+            )}
           </div>
         </header>
 
@@ -176,24 +411,48 @@ export function AppShell() {
             <PatternMenu
               settings={settings}
               onUpdateSettings={handleUpdateSettings}
-              onStartPractice={() => navigateTo('practice')}
+              onStartPractice={() => {
+                setActiveMidiSource(null);
+                setPracticeSource('scale');
+                setPracticeMountSeq((n) => n + 1);
+                writePracticeSession({ mode: 'scale' });
+                navigateTo('practice');
+              }}
               customNoticeOpen={customNoticeOpen}
               onShowCustomNotice={handleShowCustomNotice}
             />
           )}
 
           {route === 'midi' && (
-            <section className="coming-soon-page">
-              <h2>MIDI 練唱</h2>
-              <p>即將推出</p>
-            </section>
+            <>
+              {midiRestoreNotice && (
+                <div className="midi-restore-notice" role="status">
+                  <span>{midiRestoreNotice}</span>
+                  <button
+                    type="button"
+                    className="midi-restore-dismiss"
+                    onClick={() => setMidiRestoreNotice(null)}
+                  >
+                    關閉
+                  </button>
+                </div>
+              )}
+              <MidiPage
+                settings={settings}
+                onUpdateSettings={handleUpdateSettings}
+                onStartMidiPractice={handleStartMidiPractice}
+                initialSource={activeMidiSource}
+              />
+            </>
           )}
 
           {route === 'log' && (
-            <section className="coming-soon-page">
-              <h2>練習紀錄</h2>
-              <p>即將推出</p>
-            </section>
+            <PracticeLogPage
+              logStore={logStore}
+              midiStore={midiStore}
+              onReplayEntry={(entry) => void handleReplayLogEntry(entry)}
+              reloadToken={logReloadToken}
+            />
           )}
         </main>
 
@@ -222,14 +481,17 @@ export function AppShell() {
           </button>
         </nav>
 
-        {/* 齒輪空設定面板 */}
+        {/* 全域設定面板 */}
         {globalSettingsOpen && (
           <div
             className="modal-backdrop"
             role="dialog"
             aria-modal="true"
             aria-label="全域設定"
-            onClick={() => setGlobalSettingsOpen(false)}
+            onClick={() => {
+              setGlobalSettingsOpen(false);
+              setClearLogStep(0);
+            }}
           >
             <div className="modal-card" onClick={(e) => e.stopPropagation()}>
               <div className="modal-header">
@@ -237,12 +499,81 @@ export function AppShell() {
                 <button
                   type="button"
                   className="sheet-close-btn"
-                  onClick={() => setGlobalSettingsOpen(false)}
+                  onClick={() => {
+                    setGlobalSettingsOpen(false);
+                    setClearLogStep(0);
+                  }}
                 >
                   關閉
                 </button>
               </div>
-              <p className="modal-placeholder-text">設定項目將於後續步驟加入。</p>
+              <div className="modal-section">
+                <h3 className="modal-section-title">練習紀錄資料</h3>
+                {clearLogStep === 0 && (
+                  <button
+                    type="button"
+                    className="log-clear-all-btn"
+                    onClick={() => {
+                      setClearLogNotice(false);
+                      setClearLogStep(1);
+                    }}
+                  >
+                    清除全部紀錄
+                  </button>
+                )}
+                {clearLogStep === 1 && (
+                  <div className="log-clear-confirm-box">
+                    <p>確定要清除所有練習紀錄嗎？此動作無法復原。</p>
+                    <div className="log-clear-confirm-actions">
+                      <button
+                        type="button"
+                        className="log-clear-danger-btn"
+                        onClick={() => setClearLogStep(2)}
+                      >
+                        確定清除
+                      </button>
+                      <button
+                        type="button"
+                        className="log-clear-cancel-btn"
+                        onClick={() => setClearLogStep(0)}
+                      >
+                        取消
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {clearLogStep === 2 && (
+                  <div className="log-clear-confirm-box">
+                    <p>請再次確認：真的要永久刪除全部練習紀錄嗎？</p>
+                    <div className="log-clear-confirm-actions">
+                      <button
+                        type="button"
+                        className="log-clear-danger-btn"
+                        onClick={async () => {
+                          await logStore.clear();
+                          setClearLogStep(0);
+                          setClearLogNotice(true);
+                          setLogReloadToken((t) => t + 1);
+                        }}
+                      >
+                        永久刪除
+                      </button>
+                      <button
+                        type="button"
+                        className="log-clear-cancel-btn"
+                        onClick={() => setClearLogStep(0)}
+                      >
+                        取消
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {clearLogNotice && (
+                  <p className="log-clear-done" role="status">
+                    已清除全部練習紀錄
+                  </p>
+                )}
+              </div>
             </div>
           </div>
         )}

@@ -6,10 +6,31 @@ import {
   type Exercise,
   type KeyBlock,
 } from '../../core/exercise';
-import { type Key } from '../../core/key';
+import { keyName, type Key } from '../../core/key';
+import { buildMidiExercise } from '../../core/midiExercise';
 import { hzToMidi, midiToHz } from '../../core/notes';
 import { BUILTIN_PATTERNS } from '../../core/patterns';
+import {
+  advanceSessionPlayback,
+  completeSessionAtEnd,
+  pauseSession,
+  startOrResumeSession,
+  syncSessionPlayhead,
+  toLogEntry,
+  type PracticeLogEntry,
+  type PracticeLogSource,
+  type PracticeSessionContext,
+  type PracticeSessionState,
+} from '../../core/practiceLog';
 import { staffPosition } from '../../core/staff';
+import {
+  createPracticeLogStore,
+  type PracticeLogStore,
+} from '../../state/practiceLogStore';
+import {
+  stripMidiExtension,
+  type MidiSongSettings,
+} from '../../state/midiLibrary';
 import { micCtxSecToSongSec } from '../../mic/latency';
 import {
   MicController,
@@ -48,13 +69,17 @@ import {
   type PracticeSettings,
 } from '../../state/settings';
 import { useAudioEngine } from '../AudioContext';
+import type { MidiPracticeSource } from '../midi/MidiPage';
 import { JianpuStrip } from './JianpuStrip';
 import { KeyStrip } from './KeyStrip';
 import { ModeToggleButton } from './ModeToggleButton';
 import {
+  buildMidiScorePages,
   computeStaffMetrics,
   countInDotStates,
   currentNoteIndex,
+  midiPageIndexAtTime,
+  midiScoreLines,
   noteGlyphs,
   passWindow,
   rescaleTime,
@@ -116,6 +141,9 @@ interface PracticePageProps {
   settings: PracticeSettings;
   onUpdateSettings: (patch: Partial<PracticeSettings>) => void;
   onInputActiveChange?: (active: boolean) => void;
+  midiSource?: MidiPracticeSource | null;
+  onUpdateMidiSongSettings?: (hash: string, next: MidiSongSettings) => void;
+  practiceLogStore?: PracticeLogStore;
   onBack: () => void;
 }
 
@@ -134,9 +162,18 @@ export function PracticePage({
   settings,
   onUpdateSettings,
   onInputActiveChange,
+  midiSource = null,
+  onUpdateMidiSongSettings,
+  practiceLogStore,
   onBack,
 }: PracticePageProps) {
+  const isMidiMode = Boolean(midiSource);
   const engine = useAudioEngine();
+  const logStore = useMemo(
+    () => practiceLogStore ?? createPracticeLogStore(),
+    [practiceLogStore],
+  );
+  const logSessionRef = useRef<PracticeSessionState | null>(null);
   const [bpmEditing, setBpmEditing] = useState(false);
   const viewport = usePracticeViewport(bpmEditing);
   const [sec, setSec] = useState(0);
@@ -327,6 +364,9 @@ export function PracticePage({
       BUILTIN_PATTERNS[0]!,
     [settings.patternId],
   );
+  const songTitle = midiSource
+    ? stripMidiExtension(midiSource.name)
+    : pattern.name;
 
   const voiceDisplay = useMemo(
     () => resolveVoiceDisplay(settings),
@@ -336,8 +376,116 @@ export function PracticePage({
   const pitchShift = voiceDisplay.pitchShift;
   const octaveTag = voiceDisplay.octaveTag;
 
+  const midiBuild = useMemo(() => {
+    if (!midiSource) return null;
+    try {
+      const res = buildMidiExercise(midiSource.asset, {
+        trackIndex: midiSource.songSettings.trackIndex,
+        startBar: midiSource.songSettings.startBar,
+        endBar: midiSource.songSettings.endBar,
+        transposeSemitones: midiSource.songSettings.transposeSemitones,
+        speedPercent: midiSource.songSettings.speedPercent,
+        ...(midiSource.songSettings.manualKey
+          ? { originalKey: midiSource.songSettings.manualKey }
+          : {}),
+        mode: settings.mode,
+        repeats: repeatsPerKeyToCount(settings.repeatsPerKey),
+        countIn: settings.countIn,
+        displayTranspose: pitchShift,
+      });
+      return { res, error: null as string | null };
+    } catch (err) {
+      return {
+        res: null,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }, [
+    midiSource,
+    settings.mode,
+    settings.repeatsPerKey,
+    settings.countIn,
+    pitchShift,
+  ]);
+
+  const effectiveBpm = midiBuild?.res
+    ? midiBuild.res.effectiveBpm
+    : settings.bpm;
+
+  const logSource = useMemo<PracticeLogSource>(
+    () =>
+      midiSource
+        ? {
+            kind: 'midi',
+            midiId: midiSource.id,
+            midiName: stripMidiExtension(midiSource.name),
+            midiHash: midiSource.hash,
+            startBar: midiSource.songSettings.startBar,
+            endBar: midiSource.songSettings.endBar,
+          }
+        : {
+            kind: 'scale',
+            patternId: pattern.id,
+            patternName: pattern.name,
+          },
+    [midiSource, pattern.id, pattern.name],
+  );
+
+  const logContextRef = useRef<PracticeSessionContext>({
+    source: logSource,
+    mode: settings.mode,
+    bpm: effectiveBpm,
+    rangeName: settings.rangeName,
+    voice: settings.voice,
+    micActive,
+  });
+  logContextRef.current = {
+    source: logSource,
+    mode: settings.mode,
+    bpm: effectiveBpm,
+    rangeName: settings.rangeName,
+    voice: settings.voice,
+    micActive,
+  };
+
+  const persistLogEntry = useCallback(
+    (entry: PracticeLogEntry | null) => {
+      if (!entry) return;
+      void logStore.put(entry).catch(() => {
+        // 忽略紀錄寫入錯誤以免中斷練唱
+      });
+    },
+    [logStore],
+  );
+
+  const flushLogSession = useCallback(
+    (clearAfter: boolean) => {
+      const curr = logSessionRef.current;
+      if (!curr) return;
+      const paused = pauseSession(curr, Date.now());
+      persistLogEntry(toLogEntry(paused));
+      logSessionRef.current = clearAfter ? null : paused;
+    },
+    [persistLogEntry],
+  );
+
+  useEffect(() => {
+    if (micActive && logSessionRef.current && !logSessionRef.current.usedMic) {
+      logSessionRef.current = { ...logSessionRef.current, usedMic: true };
+    }
+  }, [micActive]);
+
+  useEffect(() => {
+    const onPageHide = () => flushLogSession(false);
+    window.addEventListener('pagehide', onPageHide);
+    return () => window.removeEventListener('pagehide', onPageHide);
+  }, [flushLogSession]);
+
   // 計算完整調性序列，用於調名清單選取與記憶
   const fullKeys = useMemo<KeyBlock[]>(() => {
+    if (isMidiMode) {
+      return midiBuild?.res?.exercise.keys ?? [];
+    }
     try {
       const baseEx = buildExercise(pattern, {
         ...toExerciseOptions(settings),
@@ -351,6 +499,8 @@ export function PracticePage({
       return [];
     }
   }, [
+    isMidiMode,
+    midiBuild,
     pattern,
     settings.startTonic,
     settings.rangeName,
@@ -438,6 +588,12 @@ export function PracticePage({
   }, [keySelection.onlySelected, keySelection.selectedIndices, fullTonics]);
 
   const { exercise, buildError } = useMemo(() => {
+    if (isMidiMode) {
+      return {
+        exercise: midiBuild?.res?.exercise ?? null,
+        buildError: midiBuild?.error ?? null,
+      };
+    }
     try {
       const ex = buildExercise(pattern, {
         ...toExerciseOptions(settings),
@@ -453,7 +609,7 @@ export function PracticePage({
         buildError: err instanceof Error ? err.message : String(err),
       };
     }
-  }, [pattern, settings, pitchShift, selectedTonicList]);
+  }, [isMidiMode, midiBuild, pattern, settings, pitchShift, selectedTonicList]);
   exerciseRef.current = exercise;
 
   // 訂閱播放位置與結束事件
@@ -490,7 +646,34 @@ export function PracticePage({
       }
       suppressLoadPosRef.current = false;
 
+      const nowMs = Date.now();
       const ex = exerciseRef.current;
+      if (isPlaying) {
+        const curr = logSessionRef.current;
+        if (!curr || !curr.isPlaying) {
+          const { state, finalizedPrev } = startOrResumeSession(
+            curr,
+            logContextRef.current,
+            nowMs,
+          );
+          persistLogEntry(finalizedPrev);
+          logSessionRef.current = state;
+        }
+      }
+      if (logSessionRef.current) {
+        logSessionRef.current = advanceSessionPlayback(
+          logSessionRef.current,
+          s,
+          isPlaying,
+          ex,
+          micActiveRef.current,
+          nowMs,
+        );
+        if (!isPlaying) {
+          persistLogEntry(toLogEntry(logSessionRef.current));
+        }
+      }
+
       if (isPlaying && ex) {
         if (repeatsPerKeyRef.current === 'inf') {
           const anchorIdx = Math.max(
@@ -501,6 +684,18 @@ export function PracticePage({
           if (anchorKb && s >= anchorKb.end - 0.015) {
             const now = performance.now();
             if (now - infLoopRef.current.lastSeekAt > 150) {
+              if (logSessionRef.current) {
+                logSessionRef.current = syncSessionPlayhead(
+                  completeSessionAtEnd(
+                    logSessionRef.current,
+                    ex,
+                    nowMs,
+                    true,
+                    s,
+                  ),
+                  infLoopSeekTarget(anchorKb),
+                );
+              }
               triggerInfLoop(anchorKb, now, false);
               return;
             }
@@ -521,6 +716,7 @@ export function PracticePage({
       setPlaying(isPlaying);
     });
     const unsubEnd = engine.onEnded(() => {
+      const nowMs = Date.now();
       const ex = exerciseRef.current;
       if (repeatsPerKeyRef.current === 'inf' && ex) {
         const anchorIdx = Math.max(
@@ -529,9 +725,31 @@ export function PracticePage({
         );
         const anchorKb = ex.keys[anchorIdx];
         if (anchorKb) {
+          if (logSessionRef.current) {
+            logSessionRef.current = syncSessionPlayhead(
+              completeSessionAtEnd(
+                logSessionRef.current,
+                ex,
+                nowMs,
+                true,
+                anchorKb.end,
+              ),
+              infLoopSeekTarget(anchorKb),
+            );
+          }
           triggerInfLoop(anchorKb, performance.now(), true);
           return;
         }
+      }
+      if (logSessionRef.current) {
+        logSessionRef.current = completeSessionAtEnd(
+          logSessionRef.current,
+          ex,
+          nowMs,
+          false,
+          ex?.total,
+        );
+        persistLogEntry(toLogEntry(logSessionRef.current));
       }
       lastPosRef.current = {
         sec: lastPosRef.current.sec,
@@ -543,9 +761,10 @@ export function PracticePage({
     return () => {
       unsubPos();
       unsubEnd();
+      flushLogSession(true);
       engine.stop();
     };
-  }, [engine]);
+  }, [engine, flushLogSession, persistLogEntry]);
 
   // 播放中以 requestAnimationFrame 外插秒數，讓藍色虛線平滑移動
   useEffect(() => {
@@ -570,10 +789,10 @@ export function PracticePage({
     engine.setA4(settings.a4);
     engine.load(exercise, {
       pianoDuringSing: settings.pianoDuringSing,
-      pad: settings.pad,
+      pad: isMidiMode ? false : settings.pad,
       click: settings.countIn,
       beatClicks: true,
-      bpm: settings.bpm,
+      bpm: effectiveBpm,
       voiceForGlide: true,
     });
     const pendingKey = pendingSeekKeyRef.current;
@@ -619,6 +838,8 @@ export function PracticePage({
   }, [
     engine,
     exercise,
+    isMidiMode,
+    effectiveBpm,
     settings.a4,
     settings.bpm,
     settings.pianoDuringSing,
@@ -1009,7 +1230,38 @@ export function PracticePage({
     };
   }, []);
 
+  function applyMidiSpeedChange(nextSpeedRaw: number) {
+    if (!midiSource || !midiBuild?.res || !onUpdateMidiSongSettings) return;
+    const prevBpm = midiBuild.res.effectiveBpm;
+    const baseBpm = midiBuild.res.baseBpm;
+    const nextSpeed = Math.max(
+      50,
+      Math.min(150, Math.round(nextSpeedRaw / 5) * 5),
+    );
+    if (nextSpeed === midiSource.songSettings.speedPercent) return;
+    const nextBpm = Math.round(baseBpm * (nextSpeed / 100) * 10) / 10;
+    const currentSec = getExtrapolatedSec();
+    const scaledSec = rescaleTime(currentSec, prevBpm, nextBpm);
+    const isPlaying = playingRef.current;
+    pendingSeekRef.current = { sec: scaledSec, resumePlay: isPlaying };
+    lastPosRef.current = {
+      sec: scaledSec,
+      time: performance.now(),
+      playing: isPlaying,
+    };
+    setSec(scaledSec);
+    onUpdateMidiSongSettings(midiSource.hash, {
+      ...midiSource.songSettings,
+      speedPercent: nextSpeed,
+    });
+  }
+
   function applyBpmChange(nextRaw: number) {
+    if (isMidiMode && midiBuild?.res) {
+      const nextSpeed = (nextRaw / midiBuild.res.baseBpm) * 100;
+      applyMidiSpeedChange(nextSpeed);
+      return;
+    }
     const prevBpm = settingsRef.current.bpm;
     const nextBpm = clampBpm(nextRaw);
     if (nextBpm === prevBpm) {
@@ -1030,6 +1282,10 @@ export function PracticePage({
   }
 
   function handleBpmStep(delta: -1 | 1) {
+    if (isMidiMode && midiSource) {
+      applyMidiSpeedChange(midiSource.songSettings.speedPercent + delta * 5);
+      return;
+    }
     applyBpmChange(stepBpm(settingsRef.current.bpm, delta));
   }
 
@@ -1038,6 +1294,10 @@ export function PracticePage({
   }
 
   function handleBpmReset() {
+    if (isMidiMode) {
+      applyMidiSpeedChange(100);
+      return;
+    }
     applyBpmChange(menuBpmRef.current);
   }
 
@@ -1050,6 +1310,18 @@ export function PracticePage({
   );
 
   function handleTransposeStep(delta: -1 | 1) {
+    if (isMidiMode && midiSource && onUpdateMidiSongSettings) {
+      const nextT = midiSource.songSettings.transposeSemitones + delta;
+      if (nextT < -12 || nextT > 12) {
+        showBoundaryHint();
+        return;
+      }
+      onUpdateMidiSongSettings(midiSource.hash, {
+        ...midiSource.songSettings,
+        transposeSemitones: nextT,
+      });
+      return;
+    }
     const nextTonic = settings.startTonic + delta;
     if (nextTonic < feasibleLow || nextTonic > feasibleHigh) {
       showBoundaryHint();
@@ -1073,10 +1345,10 @@ export function PracticePage({
       engine.setA4(settings.a4);
       engine.load(exercise, {
         pianoDuringSing: settings.pianoDuringSing,
-        pad: settings.pad,
+        pad: isMidiMode ? false : settings.pad,
         click: settings.countIn,
         beatClicks: true,
-        bpm: settings.bpm,
+        bpm: effectiveBpm,
         voiceForGlide: true,
       });
       engine.setGain('metro', settings.metronome ? 1 : 0);
@@ -1106,20 +1378,57 @@ export function PracticePage({
       playing,
     };
     setSec(targetSec);
+    if (logSessionRef.current) {
+      logSessionRef.current = syncSessionPlayhead(
+        logSessionRef.current,
+        targetSec,
+      );
+    }
     engine.seekToKey(clampedIdx);
+  }
+
+  function jumpToMidiPage(pageIdx: number) {
+    if (!exercise || midiPages.length === 0) return;
+    const clampedIdx = Math.max(0, Math.min(midiPages.length - 1, pageIdx));
+    const targetSec = midiPages[clampedIdx]?.start ?? 0;
+    rawSungRef.current = rawSungRef.current.filter((p) => p.t < targetSec);
+    voiceGateRef.current.reset();
+    setSungVersion((v) => v + 1);
+    lastPosRef.current = {
+      sec: targetSec,
+      time: performance.now(),
+      playing,
+    };
+    setSec(targetSec);
+    if (logSessionRef.current) {
+      logSessionRef.current = syncSessionPlayhead(
+        logSessionRef.current,
+        targetSec,
+      );
+    }
+    engine.seek(targetSec);
   }
 
   function handlePrevKey() {
     if (!exercise) return;
+    if (isMidiMode) {
+      jumpToMidiPage(midiPageIdx - 1);
+      return;
+    }
     jumpToKey(Math.max(0, currentKeyIndex - 1));
   }
 
   function handleNextKey() {
     if (!exercise) return;
+    if (isMidiMode) {
+      jumpToMidiPage(midiPageIdx + 1);
+      return;
+    }
     jumpToKey(Math.min(exercise.keys.length - 1, currentKeyIndex + 1));
   }
 
   function stopAndResetPlayback() {
+    flushLogSession(true);
     engine.stop();
     loopAnchorKeyRef.current = 0;
     setInfLoopCount(1);
@@ -1225,6 +1534,7 @@ export function PracticePage({
   }
 
   function handleBackClick() {
+    flushLogSession(true);
     engine.stop();
     void stopMic();
     onBack();
@@ -1303,8 +1613,18 @@ export function PracticePage({
   const maxLines = vpLayout.lineCount;
   const staffHeight = vpLayout.staffHeight;
 
+  const midiAvailWidth = Math.max(120, scoreWidth - 96);
+  const midiPages = useMemo(
+    () => (isMidiMode && exercise ? buildMidiScorePages(exercise, midiAvailWidth) : []),
+    [isMidiMode, exercise, midiAvailWidth],
+  );
+  const midiPageIdx = isMidiMode ? midiPageIndexAtTime(midiPages, sec) : 0;
+
   const lines = useMemo(() => {
     if (!exercise) return [];
+    if (isMidiMode) {
+      return midiScoreLines(exercise, sec, maxLines, midiAvailWidth);
+    }
     if (isPortrait) {
       const baseLines = scoreLinesPortrait(
         exercise,
@@ -1380,7 +1700,7 @@ export function PracticePage({
       return [curr, previewLine];
     }
     return currIdx === 0 ? [curr, previewLine] : [previewLine, curr];
-  }, [exercise, sec, maxLines, settings.repeatsPerKey, isPortrait]);
+  }, [exercise, isMidiMode, midiAvailWidth, sec, maxLines, settings.repeatsPerKey, isPortrait]);
 
   const sungByLine = useMemo(() => {
     const raw = rawSungRef.current;
@@ -1517,7 +1837,20 @@ export function PracticePage({
     const isPreviewLine = line.isPreview ?? !line.isCurrent;
     const keyText = tonicLabel(lineKey);
     let lineLabel: string | null = null;
-    if (!isPreviewLine) {
+    if (isMidiMode) {
+      if (!isPreviewLine) {
+        const phaseText =
+          line.phase === 'listen'
+            ? `${keyText} 示範`
+            : `${keyText} 第 ${line.pass + 1} 遍`;
+        lineLabel =
+          midiPages.length > 1
+            ? `${phaseText} · ${midiPageIdx + 1}/${midiPages.length}`
+            : phaseText;
+      } else {
+        lineLabel = line.label;
+      }
+    } else if (!isPreviewLine) {
       if (!line.isSamePassContinuation) {
         if (line.phase === 'listen') {
           lineLabel = `${keyText} 示範`;
@@ -1710,7 +2043,7 @@ export function PracticePage({
 
     try {
       const result = await exportPracticeScreenshot({
-        patternName: pattern.name,
+        patternName: songTitle,
         keyLabel: tonicLabel(activeKey),
         keyIndex: currentKeyIndex,
         totalKeys,
@@ -1827,24 +2160,33 @@ export function PracticePage({
           ‹
         </button>
 
-        {!isPortrait && onlySelectedButton}
+        {isMidiMode ? (
+          <div className="practice-midi-title" title={songTitle}>
+            <span className="practice-midi-song">{songTitle}</span>
+            <span className="practice-midi-key">{keyName(activeKey)}</span>
+          </div>
+        ) : (
+          <>
+            {!isPortrait && onlySelectedButton}
 
-        <KeyStrip
-          keys={fullKeys}
-          activeFullKeyIndex={activeFullKeyIndex}
-          activeExerciseKeyIndex={currentKeyIndex}
-          onlySelected={keySelection.onlySelected}
-          selectedIndices={keySelection.selectedIndices}
-          isTablet={isTablet}
-          isPortrait={isPortrait}
-          leadingSlot={
-            isPortrait && selectedCount > 0 ? onlySelectedButton : undefined
-          }
-          rotationCtx={rotationCtx}
-          onToggleKey={handleToggleKey}
-          onJumpToKey={handleJumpToFullKey}
-          onReorderSelected={handleReorderSelected}
-        />
+            <KeyStrip
+              keys={fullKeys}
+              activeFullKeyIndex={activeFullKeyIndex}
+              activeExerciseKeyIndex={currentKeyIndex}
+              onlySelected={keySelection.onlySelected}
+              selectedIndices={keySelection.selectedIndices}
+              isTablet={isTablet}
+              isPortrait={isPortrait}
+              leadingSlot={
+                isPortrait && selectedCount > 0 ? onlySelectedButton : undefined
+              }
+              rotationCtx={rotationCtx}
+              onToggleKey={handleToggleKey}
+              onJumpToKey={handleJumpToFullKey}
+              onReorderSelected={handleReorderSelected}
+            />
+          </>
+        )}
 
         <div className="practice-header-right">
           <ModeToggleButton
@@ -2117,18 +2459,34 @@ export function PracticePage({
       {/* 4. 播放列 */}
       <TransportBar
         playing={playing}
-        canPrevKey={currentKeyIndex > 0}
-        canNextKey={currentKeyIndex < totalKeys - 1}
+        canPrevKey={isMidiMode ? midiPageIdx > 0 : currentKeyIndex > 0}
+        canNextKey={
+          isMidiMode
+            ? midiPageIdx < midiPages.length - 1
+            : currentKeyIndex < totalKeys - 1
+        }
         hasExercise={exercise !== null}
-        patternName={pattern.name}
+        patternName={songTitle}
         repeatsPerKey={settings.repeatsPerKey}
         currentPass={currentPassNum}
-        bpm={settings.bpm}
+        bpm={effectiveBpm}
         metronome={settings.metronome}
         firstBeat={exercise?.clicks[0]?.t ?? 0}
-        transposeOffset={transposeOffset}
-        canTransposeDown={canTransposeDown}
-        canTransposeUp={canTransposeUp}
+        transposeOffset={
+          isMidiMode && midiSource
+            ? midiSource.songSettings.transposeSemitones
+            : transposeOffset
+        }
+        canTransposeDown={
+          isMidiMode && midiSource
+            ? midiSource.songSettings.transposeSemitones > -12
+            : canTransposeDown
+        }
+        canTransposeUp={
+          isMidiMode && midiSource
+            ? midiSource.songSettings.transposeSemitones < 12
+            : canTransposeUp
+        }
         boundaryToast={boundaryToast}
         pianoDuringSing={settings.pianoDuringSing}
         isTablet={isTablet}

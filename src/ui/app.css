@@ -4147,3 +4147,821 @@ button:disabled {
   outline: 2px solid var(--text);
   outline-offset: 2px;
 }
+
+
+/* === MIDI 練唱分頁 === */
+.midi-page {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.midi-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-right: 1px solid var(--border);
+  background-color: var(--panel);
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.midi-file-input {
+  display: none;
+}
+
+.midi-import-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.midi-import-btn {
+  min-height: 40px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background-color: var(--blue);
+  color: #0b1420;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.midi-import-btn:hover {
+  filter: brightness(1.06);
+}
+
+.midi-notice-warn {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background-color: rgba(255, 180, 91, 0.14);
+  border: 1px solid rgba(255, 180, 91, 0.4);
+  color: var(--orange);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.midi-notice-error {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background-color: var(--danger-bg);
+  border: 1px solid rgba(255, 107, 120, 0.45);
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.midi-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 4px;
+}
+
+.midi-list-header h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.midi-list-count {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.midi-empty-text {
+  margin: 4px 0;
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.midi-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.midi-list-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background-color: var(--card);
+}
+
+.midi-list-item.is-active {
+  border-color: var(--blue);
+  background-color: var(--blue-bg);
+}
+
+.midi-item-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  padding: 2px 0;
+}
+
+.midi-item-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.midi-item-date {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.midi-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.midi-del-btn,
+.midi-del-confirm-btn,
+.midi-del-cancel-btn {
+  min-height: 30px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.midi-del-btn {
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+.midi-del-btn:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.midi-del-confirm-btn {
+  background-color: var(--danger);
+  color: #ffffff;
+}
+
+.midi-del-cancel-btn {
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+.midi-detail {
+  padding: 20px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.midi-empty-detail {
+  max-width: 520px;
+  margin: 40px auto;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.midi-empty-detail h2 {
+  margin: 0 0 8px;
+  font-size: 20px;
+  color: var(--text);
+}
+
+.midi-settings-card {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 18px 20px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background-color: var(--panel);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.midi-settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.midi-song-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.midi-song-meta {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.midi-start-btn {
+  min-height: 40px;
+  padding: 8px 20px;
+  border-radius: 8px;
+  background-color: var(--blue);
+  color: #0b1420;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.midi-start-btn:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.midi-select {
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background-color: var(--card);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.midi-bar-range {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.midi-bar-field {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.midi-bar-sep {
+  color: var(--text-muted);
+}
+
+.midi-inline-link {
+  font-size: 12px;
+  color: var(--blue);
+  padding: 2px 6px;
+  min-height: 28px;
+}
+
+.midi-transpose-row,
+.midi-key-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.midi-auto-transpose-btn {
+  min-height: 34px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--blue);
+  background-color: var(--blue-bg);
+  color: var(--blue-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.midi-speed-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.midi-speed-row .setting-range {
+  flex: 1;
+}
+
+.midi-transposed-key {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--blue-text);
+  white-space: nowrap;
+}
+
+/* 練唱頁 MIDI 模式標題列 */
+.practice-midi-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  overflow: hidden;
+}
+
+.practice-midi-song {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.practice-midi-key {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background-color: var(--blue-bg);
+  color: var(--blue-text);
+}
+
+@media (max-width: 767px) {
+  .midi-page {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+    overflow-y: auto;
+  }
+
+  .midi-sidebar {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    overflow-y: visible;
+    max-height: none;
+  }
+
+  .midi-detail {
+    overflow-y: visible;
+    padding: 14px;
+  }
+
+  .midi-settings-card {
+    padding: 14px;
+  }
+}
+
+/* ================= 練習紀錄頁面 ================= */
+
+.log-page {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 20px 24px 40px;
+}
+
+.log-page-inner {
+  max-width: 820px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.log-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.log-export-btn {
+  padding: 8px 14px;
+  border-radius: 8px;
+  background-color: var(--panel);
+  border: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.log-export-btn:hover:not(:disabled) {
+  border-color: var(--blue);
+  color: var(--blue-text);
+}
+
+.log-warning-banner {
+  padding: 10px 14px;
+  border-radius: 10px;
+  background-color: rgba(255, 180, 91, 0.14);
+  border: 1px solid rgba(255, 180, 91, 0.45);
+  color: var(--orange);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.log-week-card {
+  background-color: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.log-week-caption {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.log-week-bars {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+  align-items: end;
+}
+
+.log-week-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 2px;
+  border-radius: 8px;
+}
+
+.log-week-day.has-entries:hover {
+  background-color: rgba(76, 164, 255, 0.12);
+}
+
+.log-week-day:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.log-week-min {
+  font-size: 11px;
+  color: var(--text-muted);
+  min-height: 15px;
+}
+
+.log-week-track {
+  width: 100%;
+  max-width: 28px;
+  height: 52px;
+  border-radius: 6px;
+  background-color: var(--card);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+}
+
+.log-week-fill {
+  width: 100%;
+  background: linear-gradient(180deg, var(--cyan), var(--blue));
+  border-radius: 4px 4px 0 0;
+  transition: height 0.2s ease;
+}
+
+.log-week-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.log-week-day.is-today .log-week-label {
+  color: var(--blue-text);
+}
+
+.log-empty {
+  background-color: var(--panel);
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 15px;
+}
+
+.log-empty p {
+  margin: 0;
+}
+
+.log-days {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.log-day-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-radius: 12px;
+  transition: background-color 0.3s ease;
+}
+
+.log-day-group.is-highlighted {
+  background-color: rgba(76, 164, 255, 0.08);
+}
+
+.log-day-header {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-muted);
+  padding: 2px 4px;
+}
+
+.log-day-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.log-entry-card {
+  background-color: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.log-entry-card.is-expanded {
+  border-color: var(--blue);
+}
+
+.log-entry-row {
+  width: 100%;
+  padding: 12px 14px;
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1.3fr) minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  font-size: 14px;
+}
+
+.log-entry-time {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+}
+
+.log-entry-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-entry-keys {
+  color: var(--blue-text);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-entry-passes,
+.log-entry-dur {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.log-entry-dur {
+  color: var(--cyan);
+}
+
+.log-entry-details {
+  border-top: 1px solid var(--border);
+  background-color: var(--card);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.log-detail-grid {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px 16px;
+}
+
+.log-detail-grid dt {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+
+.log-detail-grid dd {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.log-entry-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.log-replay-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.log-replay-btn {
+  padding: 7px 14px;
+  border-radius: 8px;
+  background-color: var(--blue-bg);
+  color: var(--blue-text);
+  border: 1px solid var(--blue);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.log-midi-deleted-note {
+  font-size: 12px;
+  color: var(--danger);
+}
+
+.log-delete-btn {
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.log-delete-confirm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--danger);
+}
+
+.log-delete-yes-btn {
+  padding: 6px 12px;
+  border-radius: 8px;
+  background-color: var(--danger-bg);
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.log-delete-no-btn {
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.modal-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.modal-section-title {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.log-clear-all-btn {
+  align-self: flex-start;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background-color: var(--danger-bg);
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.log-clear-confirm-box {
+  background-color: var(--card);
+  border: 1px solid var(--danger);
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.log-clear-confirm-box p {
+  margin: 0;
+}
+
+.log-clear-confirm-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.log-clear-danger-btn {
+  padding: 7px 12px;
+  border-radius: 8px;
+  background-color: var(--danger);
+  color: #171b24;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.log-clear-cancel-btn {
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.log-clear-done {
+  margin: 0;
+  font-size: 13px;
+  color: var(--cyan);
+}
+
+@media (max-width: 720px) {
+  .log-page {
+    padding: 14px 14px calc(76px + env(safe-area-inset-bottom));
+  }
+
+  .log-entry-row {
+    grid-template-columns: 46px minmax(0, 1fr) auto auto;
+  }
+
+  .log-entry-keys {
+    grid-column: 2 / -1;
+    order: 5;
+  }
+}
+
+.practice-loading-state {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.midi-restore-notice {
+  position: fixed;
+  top: 74px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background-color: var(--danger-bg);
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.midi-restore-dismiss {
+  color: var(--text);
+  font-size: 12px;
+  text-decoration: underline;
+}

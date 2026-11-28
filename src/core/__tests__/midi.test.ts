@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   melodyCandidates,
   parseMidi,
+  suggestMelodyTrack,
   trackInfo,
+  trackOverlapRatio,
+  type MidiAsset,
 } from '../midi';
 
 /** 編碼 MIDI 可變長度數值（VLQ） */
@@ -102,12 +105,13 @@ describe('parseMidi', () => {
     expect(asset.tracks[0]!.name).toBe('旋律軌 1');
   });
 
-  it('支援 format 1、running status、velocity 0、CC64 延音踏板、channel 10 略過與缺 note-off 收尾', () => {
+  it('支援 format 1、running status、velocity 0、CC64 延音踏板、channel 10 保留（旋律推薦排除）與缺 note-off 收尾', () => {
     // 軌 0：只有 tempo 與空白軌名（有音符才會保留，這裡只放 tempo）
     const t0 = [...tempoEvent(0, 500000), ...endOfTrack(0)];
     // 軌 1：running status + velocity 0 + CC64 延音 + 最後一個音缺 note-off
     const t1 = [
       ...trackNameEvent(0, '主旋律'),
+      ...encodeVlq(0), 0xc0, 40, // Program Change: Violin (40)
       ...encodeVlq(0), 0xb0, 64, 127, // 踩下延音踏板
       ...encodeVlq(0), 0x90, 60, 100, // C4 start = 0
       ...encodeVlq(240), 60, 0, // running status: note_on vel=0 at 0.25s（受踏板延長）
@@ -116,7 +120,7 @@ describe('parseMidi', () => {
       // E4 缺 note-off，應在檔案結束 1.0s 收尾
       ...endOfTrack(240),
     ];
-    // 軌 2：channel 10（索引 9）打擊樂，應整個略過
+    // 軌 2：channel 10（索引 9）打擊樂，會保留在 tracks（channel=9），但 melodyCandidates 仍排除
     const t2 = [
       ...encodeVlq(0), 0x99, 36, 100,
       ...encodeVlq(480), 0x89, 36, 0,
@@ -124,10 +128,11 @@ describe('parseMidi', () => {
     ];
 
     const asset = parseMidi(buildMidi(1, 480, [t0, t1, t2]));
-    expect(asset.tracks).toHaveLength(1);
+    expect(asset.tracks).toHaveLength(2);
     const tr = asset.tracks[0]!;
     expect(tr.index).toBe(1);
     expect(tr.name).toBe('主旋律');
+    expect(tr.program).toBe(40);
     expect(tr.notes).toHaveLength(2);
     expect(tr.notes[0]!.midi).toBe(60);
     expect(tr.notes[0]!.start).toBeCloseTo(0, 6);
@@ -135,6 +140,13 @@ describe('parseMidi', () => {
     expect(tr.notes[1]!.midi).toBe(64);
     expect(tr.notes[1]!.start).toBeCloseTo(0.5, 6);
     expect(tr.notes[1]!.end).toBeCloseTo(1.0, 6);
+
+    const drumTr = asset.tracks[1]!;
+    expect(drumTr.index).toBe(2);
+    expect(drumTr.channel).toBe(9);
+    expect(drumTr.notes).toHaveLength(1);
+    expect(melodyCandidates(asset)).toEqual([1]);
+    expect(suggestMelodyTrack(asset)).toBe(1);
   });
 
   it('正確產生 beats（含 4/4 與 6/8 拍號切換）', () => {
@@ -229,5 +241,119 @@ describe('parseMidi', () => {
         expect(asset.beats[i]![0]).toBeGreaterThan(asset.beats[i - 1]![0]);
       }
     }
+  });
+
+  it('trackOverlapRatio 與 trackInfo 以異音重疊時間比例 > 10% 判斷複音', () => {
+    // 總發聲 2.0s，異音重疊 0.1s（5% <= 10%）-> 單音（非複音）
+    const mostlyMono: MidiAsset = {
+      tracks: [
+        {
+          index: 0,
+          name: 'Lead',
+          notes: [
+            { start: 0, end: 1.0, midi: 64, velocity: 90, track: 0 },
+            { start: 0.9, end: 2.0, midi: 67, velocity: 90, track: 0 },
+          ],
+        },
+      ],
+      duration: 2.0,
+      ticksPerBeat: 480,
+      beats: [],
+    };
+    expect(trackOverlapRatio(mostlyMono.tracks[0]!)).toBeCloseTo(0.05, 4);
+    expect(trackInfo(mostlyMono.tracks[0]!).polyphonic).toBe(false);
+
+    // 總發聲 2.0s，異音重疊 0.5s（25% > 10%）-> 複音
+    const polyTrack = {
+      index: 1,
+      name: 'Chords',
+      notes: [
+        { start: 0, end: 1.0, midi: 60, velocity: 90, track: 1 },
+        { start: 0.5, end: 2.0, midi: 64, velocity: 90, track: 1 },
+      ],
+    };
+    expect(trackOverlapRatio(polyTrack)).toBeCloseTo(0.25, 4);
+    expect(trackInfo(polyTrack).polyphonic).toBe(true);
+  });
+
+  it('suggestMelodyTrack：名為 Vocal 的軌即使音數少且有少量重疊也排第一，鼓軌永不推薦', () => {
+    const asset: MidiAsset = {
+      tracks: [
+        // 軌 0：鼓軌（channel 9），就算名字寫 Melody 也不推薦
+        {
+          index: 0,
+          name: 'Melody Drums',
+          channel: 9,
+          notes: Array.from({ length: 100 }, (_, i) => ({
+            start: i * 0.25,
+            end: i * 0.25 + 0.2,
+            midi: 60,
+            velocity: 100,
+            track: 0,
+          })),
+        },
+        // 軌 1：大量伴奏音符（複音）
+        {
+          index: 1,
+          name: 'Guitar',
+          channel: 7,
+          notes: Array.from({ length: 400 }, (_, i) => ({
+            start: Math.floor(i / 2) * 0.5,
+            end: Math.floor(i / 2) * 0.5 + 0.5,
+            midi: 60 + (i % 2) * 4,
+            velocity: 80,
+            track: 1,
+          })),
+        },
+        // 軌 2：Vocal 軌，音數少但名稱明確且只有少量重疊（5%）
+        {
+          index: 2,
+          name: 'Vocal',
+          channel: 1,
+          notes: [
+            { start: 0, end: 1.0, midi: 64, velocity: 95, track: 2 },
+            { start: 0.9, end: 2.0, midi: 67, velocity: 95, track: 2 },
+            { start: 2.0, end: 3.0, midi: 69, velocity: 95, track: 2 },
+          ],
+        },
+      ],
+      duration: 100,
+      ticksPerBeat: 120,
+      beats: [],
+    };
+
+    expect(suggestMelodyTrack(asset)).toBe(2);
+    expect(melodyCandidates(asset)).toEqual([2, 1]);
+
+    // 只有鼓軌時不推薦任何軌
+    const drumsOnly: MidiAsset = {
+      tracks: [asset.tracks[0]!],
+      duration: 25,
+      ticksPerBeat: 120,
+      beats: [],
+    };
+    expect(suggestMelodyTrack(drumsOnly)).toBeNull();
+    expect(melodyCandidates(drumsOnly)).toEqual([]);
+  });
+
+  it('同音高重疊 note-on（on60@0, on60@30, off60@59, off60@89）切成兩音 [0,30) 與 [30,89)', () => {
+    const t0 = [
+      ...tempoEvent(0, 500000), // 120 BPM, 480 TPB
+      ...encodeVlq(0), 0x90, 60, 90, // on60@0
+      ...encodeVlq(30), 0x90, 60, 90, // on60@30 -> 結束前一個音並開新音
+      ...encodeVlq(29), 0x80, 60, 0, // off60@59 -> 消耗前一個音的配對 note-off
+      ...encodeVlq(30), 0x80, 60, 0, // off60@89 -> 結束第二個音
+      ...endOfTrack(0),
+    ];
+    const asset = parseMidi(buildMidi(0, 480, [t0]));
+    expect(asset.tracks).toHaveLength(1);
+    const notes = asset.tracks[0]!.notes;
+    expect(notes).toHaveLength(2);
+    expect(notes[0]!.midi).toBe(60);
+    expect(notes[0]!.startTick).toBe(0);
+    expect(notes[0]!.endTick).toBe(30);
+    expect(notes[1]!.midi).toBe(60);
+    expect(notes[1]!.startTick).toBe(30);
+    expect(notes[1]!.endTick).toBe(89);
   });
 });

@@ -261,6 +261,7 @@ export function AppShell() {
         writePracticeSession({
           mode: 'midi',
           id: prev.id,
+          hash: prev.hash,
           startBar: next.startBar,
           endBar: next.endBar,
         });

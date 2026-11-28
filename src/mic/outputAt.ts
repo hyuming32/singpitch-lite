@@ -1,7 +1,7 @@
 import type { SchedEvent } from '../audio/dsp/schedule.ts';
 import { VOICE_CONFIG } from './voiceConfig.ts';
 
-export type OutputBus = 'melody' | 'pad' | 'cadence' | 'metro' | 'keys';
+export type OutputBus = 'melody' | 'pad' | 'cadence' | 'metro' | 'keys' | 'accomp';
 
 export interface ActiveKey {
   hz: number;
@@ -87,6 +87,10 @@ export function outputAt(
             held: false,
           });
         }
+        break;
+      }
+      case 'drum': {
+        // 鼓組為無固定音高打擊聲，不納入基頻比對輸出
         break;
       }
     }

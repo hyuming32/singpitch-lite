@@ -20,7 +20,8 @@ declare function registerProcessor(
 ): void;
 
 export type WorkletInMessage =
-  | { type: 'load'; events: SchedEvent[]; totalFrames: number }
+  | { type: 'load'; events: SchedEvent[]; totalFrames: number; generation?: number }
+  | { type: 'append'; events: SchedEvent[]; generation: number }
   | { type: 'play' }
   | { type: 'pause' }
   | { type: 'stop' }
@@ -35,6 +36,7 @@ class SingPitchEngineProcessor extends AudioWorkletProcessor {
   private monoBuf: Float32Array;
   private readonly reportIntervalFrames: number;
   private framesSinceReport = 0;
+  private generation = 0;
 
   constructor() {
     super();
@@ -56,6 +58,7 @@ class SingPitchEngineProcessor extends AudioWorkletProcessor {
       case 'load':
         stopExerciseVoices(this.state);
         this.state.playing = false;
+        this.generation = msg.generation ?? this.generation + 1;
         this.state.events = msg.events;
         this.state.totalFrames = msg.totalFrames;
         this.state.frame = 0;
@@ -66,6 +69,13 @@ class SingPitchEngineProcessor extends AudioWorkletProcessor {
           playing: false,
           ctxFrame: this.getCtxFrame(),
         });
+        break;
+      case 'append':
+        if (msg.generation === this.generation && msg.events.length > 0) {
+          for (let i = 0; i < msg.events.length; i++) {
+            this.state.events.push(msg.events[i]!);
+          }
+        }
         break;
       case 'play':
         if (

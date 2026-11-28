@@ -33,3 +33,8 @@ export function useAudioEngine(): AudioEngine {
   }
   return engine;
 }
+
+/** 安全取得全域 AudioEngine 實例（無 AudioProvider 時回傳 null，供獨立測試使用） */
+export function useOptionalAudioEngine(): AudioEngine | null {
+  return useContext(AudioEngineContext);
+}

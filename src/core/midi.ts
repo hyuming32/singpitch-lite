@@ -4,6 +4,10 @@ export interface MidiNote {
   midi: number;
   velocity: number;
   track: number;
+  /** 原始 MIDI 起始 tick（僅由 parseMidi 解析時填入） */
+  startTick?: number;
+  /** 原始 MIDI 結束 tick（僅由 parseMidi 解析時填入） */
+  endTick?: number;
 }
 
 export interface MidiTrack {
@@ -11,15 +15,26 @@ export interface MidiTrack {
   name: string;
   notes: MidiNote[];
   channel?: number;
+  /** GM 樂器編號（0–127），來自 Program Change（0xC0） */
+  program?: number;
 }
 
 export type MidiBeat = [time: number, beatInBar: number, bpm: number];
+
+export interface MidiTimeSignatureEvent {
+  tick: number;
+  time: number;
+  numerator: number;
+  denominator: number;
+}
 
 export interface MidiAsset {
   tracks: MidiTrack[];
   duration: number;
   ticksPerBeat: number;
   beats: MidiBeat[];
+  /** MIDI 拍號事件序列（含起始預設 4/4 與中途變拍號） */
+  timeSignatures?: MidiTimeSignatureEvent[];
 }
 
 export interface TrackInfo {
@@ -32,7 +47,7 @@ export interface TrackInfo {
 const MAX_MIDI_SECONDS = 900;
 const MAX_BEATS_COUNT = 20000;
 const MAX_BEATS_SECONDS = 1800;
-const POLYPHONIC_OVERLAP_SEC = 0.03;
+const POLYPHONIC_OVERLAP_RATIO = 0.1;
 
 const ERR_INVALID_MIDI = '無法讀取 MIDI，請確認為標準 .mid 檔。';
 const ERR_TYPE2_MIDI =
@@ -84,6 +99,14 @@ type RawEvent =
       channel: number;
       control: number;
       value: number;
+    }
+  | {
+      tick: number;
+      track: number;
+      order: number;
+      type: 'program_change';
+      channel: number;
+      program: number;
     }
   | {
       tick: number;
@@ -372,8 +395,19 @@ export function parseMidi(data: Uint8Array | ArrayBuffer): MidiAsset {
         const msgType = status & 0xf0;
         const channel = status & 0x0f;
         const data1 = reader.readU8(chunkEnd);
-        if (msgType === 0xc0 || msgType === 0xd0) {
-          // 單資料位元組訊息（Program Change / Channel Pressure），略過
+        if (msgType === 0xc0) {
+          events.push({
+            tick,
+            track: trackIndex,
+            order: order++,
+            type: 'program_change',
+            channel,
+            program: data1,
+          });
+          continue;
+        }
+        if (msgType === 0xd0) {
+          // 單資料位元組訊息（Channel Pressure），略過
           continue;
         }
         const data2 = reader.readU8(chunkEnd);
@@ -428,22 +462,41 @@ export function parseMidi(data: Uint8Array | ArrayBuffer): MidiAsset {
 
   interface PendingNote {
     start: number;
+    startTick: number;
     velocity: number;
     channel: number;
   }
 
   const active = new Map<string, PendingNote[]>();
+  const orphanedOffs = new Map<string, number>();
   const sustained = new Map<string, { pitch: number; item: PendingNote }[]>();
   const pedal = new Map<string, boolean>();
   const notesByTrack = new Map<number, MidiNote[]>();
   const channelsByTrack = new Map<number, Set<number>>();
+  const currentProgramByCh = new Map<string, number>();
+  const trackFirstNoteProgram = new Map<number, number>();
+  const trackFirstProgramFallback = new Map<number, number>();
+  const timeSignatures: MidiTimeSignatureEvent[] = [];
 
   let now = 0;
   let lastTick = 0;
   let tempo = 500000;
 
-  const finish = (track: number, pitch: number, item: PendingNote, end: number) => {
-    if (end > item.start) {
+  const finish = (
+    track: number,
+    pitch: number,
+    item: PendingNote,
+    end: number,
+    endTick: number,
+  ) => {
+    // 鼓軌（channel 10）有時可能出現極短或零長度觸發，給最小有效時長
+    const effectiveEnd =
+      item.channel === 9 && end <= item.start ? item.start + 0.05 : end;
+    const effectiveEndTick =
+      item.channel === 9 && endTick <= item.startTick
+        ? item.startTick + 1
+        : endTick;
+    if (effectiveEnd > item.start) {
       let list = notesByTrack.get(track);
       if (!list) {
         list = [];
@@ -451,10 +504,12 @@ export function parseMidi(data: Uint8Array | ArrayBuffer): MidiAsset {
       }
       list.push({
         start: item.start,
-        end,
+        end: effectiveEnd,
         midi: pitch,
         velocity: item.velocity,
         track,
+        startTick: item.startTick,
+        endTick: effectiveEndTick,
       });
       let chSet = channelsByTrack.get(track);
       if (!chSet) {
@@ -462,6 +517,12 @@ export function parseMidi(data: Uint8Array | ArrayBuffer): MidiAsset {
         channelsByTrack.set(track, chSet);
       }
       chSet.add(item.channel);
+      if (!trackFirstNoteProgram.has(track)) {
+        const chProg = currentProgramByCh.get(`${track}:${item.channel}`);
+        if (chProg !== undefined) {
+          trackFirstNoteProgram.set(track, chProg);
+        }
+      }
     }
   };
 
@@ -469,6 +530,7 @@ export function parseMidi(data: Uint8Array | ArrayBuffer): MidiAsset {
     track: number,
     channel: number,
     end: number,
+    endTick: number,
     immediate: boolean,
   ) => {
     const chKey = `${track}:${channel}`;
@@ -487,8 +549,13 @@ export function parseMidi(data: Uint8Array | ArrayBuffer): MidiAsset {
           }
           sus.push({ pitch, item });
         } else {
-          finish(track, pitch, item, end);
+          finish(track, pitch, item, end, endTick);
         }
+      }
+    }
+    for (const key of orphanedOffs.keys()) {
+      if (key.startsWith(prefix)) {
+        orphanedOffs.delete(key);
       }
     }
     if (immediate) {
@@ -496,7 +563,7 @@ export function parseMidi(data: Uint8Array | ArrayBuffer): MidiAsset {
       if (sus) {
         sustained.delete(chKey);
         for (const { pitch, item } of sus) {
-          finish(track, pitch, item, end);
+          finish(track, pitch, item, end, endTick);
         }
       }
     }
@@ -512,11 +579,30 @@ export function parseMidi(data: Uint8Array | ArrayBuffer): MidiAsset {
       tempo = ev.tempo;
       continue;
     }
-    if (ev.type === 'time_signature' || ev.type === 'end_of_track') {
+    if (ev.type === 'time_signature') {
+      const lastSig = timeSignatures[timeSignatures.length - 1];
+      if (lastSig && lastSig.tick === ev.tick) {
+        lastSig.numerator = ev.numerator;
+        lastSig.denominator = ev.denominator;
+      } else {
+        timeSignatures.push({
+          tick: ev.tick,
+          time: now,
+          numerator: ev.numerator,
+          denominator: ev.denominator,
+        });
+      }
       continue;
     }
-    // 略過打擊樂 channel 10（索引 9）
-    if (ev.channel === 9) {
+    if (ev.type === 'end_of_track') {
+      continue;
+    }
+    if (ev.type === 'program_change') {
+      const chKeyProg = `${ev.track}:${ev.channel}`;
+      currentProgramByCh.set(chKeyProg, ev.program);
+      if (!trackFirstProgramFallback.has(ev.track)) {
+        trackFirstProgramFallback.set(ev.track, ev.program);
+      }
       continue;
     }
 
@@ -528,12 +614,28 @@ export function parseMidi(data: Uint8Array | ArrayBuffer): MidiAsset {
         queue = [];
         active.set(noteKey, queue);
       }
-      queue.push({ start: now, velocity: ev.velocity, channel: ev.channel });
+      // 同 channel 同音高在前一個尚未 note-off 時又收到 note-on：結束前一個音並記錄一個待消耗的對應 note-off
+      while (queue.length > 0) {
+        const prev = queue.shift()!;
+        finish(ev.track, ev.note, prev, now, ev.tick);
+        orphanedOffs.set(noteKey, (orphanedOffs.get(noteKey) ?? 0) + 1);
+      }
+      queue.push({
+        start: now,
+        startTick: ev.tick,
+        velocity: ev.velocity,
+        channel: ev.channel,
+      });
     } else if (
       ev.type === 'note_off' ||
       (ev.type === 'note_on' && ev.velocity === 0)
     ) {
       const noteKey = `${chKey}:${ev.note}`;
+      const orphan = orphanedOffs.get(noteKey) ?? 0;
+      if (orphan > 0) {
+        orphanedOffs.set(noteKey, orphan - 1);
+        continue;
+      }
       const queue = active.get(noteKey);
       if (queue && queue.length > 0) {
         const item = queue.shift()!;
@@ -545,7 +647,7 @@ export function parseMidi(data: Uint8Array | ArrayBuffer): MidiAsset {
           }
           sus.push({ pitch: ev.note, item });
         } else {
-          finish(ev.track, ev.note, item, now);
+          finish(ev.track, ev.note, item, now, ev.tick);
         }
       }
     } else if (ev.type === 'control_change' && ev.control === 64) {
@@ -557,7 +659,7 @@ export function parseMidi(data: Uint8Array | ArrayBuffer): MidiAsset {
         if (sus) {
           sustained.delete(chKey);
           for (const { pitch, item } of sus) {
-            finish(ev.track, pitch, item, now);
+            finish(ev.track, pitch, item, now, ev.tick);
           }
         }
       }
@@ -565,7 +667,7 @@ export function parseMidi(data: Uint8Array | ArrayBuffer): MidiAsset {
       ev.type === 'control_change' &&
       (ev.control === 120 || ev.control === 123)
     ) {
-      releaseChannel(ev.track, ev.channel, now, ev.control === 120);
+      releaseChannel(ev.track, ev.channel, now, ev.tick, ev.control === 120);
     }
   }
 
@@ -575,14 +677,23 @@ export function parseMidi(data: Uint8Array | ArrayBuffer): MidiAsset {
     const track = Number(trackStr);
     const pitch = Number(pitchStr);
     for (const item of queue) {
-      finish(track, pitch, item, now);
+      finish(track, pitch, item, now, lastTick);
     }
   }
   for (const [chKey, sus] of sustained.entries()) {
     const track = Number(chKey.split(':')[0]);
     for (const { pitch, item } of sus) {
-      finish(track, pitch, item, now);
+      finish(track, pitch, item, now, lastTick);
     }
+  }
+
+  if (timeSignatures.length === 0 || timeSignatures[0]!.tick > 0) {
+    timeSignatures.unshift({
+      tick: 0,
+      time: 0,
+      numerator: 4,
+      denominator: 4,
+    });
   }
 
   const tracks: MidiTrack[] = [];
@@ -593,11 +704,14 @@ export function parseMidi(data: Uint8Array | ArrayBuffer): MidiAsset {
     items.sort((a, b) => a.start - b.start || a.midi - b.midi || a.end - b.end);
     const chSet = channelsByTrack.get(index);
     const channel = chSet && chSet.size === 1 ? [...chSet][0] : undefined;
+    const program =
+      trackFirstNoteProgram.get(index) ?? trackFirstProgramFallback.get(index);
     tracks.push({
       index,
       name: trackNames.get(index) ?? `旋律軌 ${index + 1}`,
       notes: items,
       ...(channel !== undefined ? { channel } : {}),
+      ...(program !== undefined ? { program } : {}),
     });
   }
 
@@ -612,55 +726,153 @@ export function parseMidi(data: Uint8Array | ArrayBuffer): MidiAsset {
     duration: now,
     ticksPerBeat,
     beats,
+    timeSignatures,
   };
 }
 
-/** 計算音軌的音域、音符數與是否為和弦軌（時間重疊超過 30 ms） */
+/** 計算音軌中不同音高同時發聲（重疊）時間佔該軌總發聲時間的比例（0..1） */
+export function trackOverlapRatio(track: MidiTrack): number {
+  const { notes } = track;
+  if (notes.length < 2) {
+    return 0;
+  }
+
+  const events: { t: number; delta: 1 | -1; midi: number }[] = [];
+  for (const n of notes) {
+    if (n.end > n.start) {
+      events.push({ t: n.start, delta: 1, midi: n.midi });
+      events.push({ t: n.end, delta: -1, midi: n.midi });
+    }
+  }
+  if (events.length === 0) {
+    return 0;
+  }
+
+  events.sort((a, b) => a.t - b.t || a.delta - b.delta);
+
+  const pitchCounts = new Map<number, number>();
+  let totalNotesActive = 0;
+  let activeDur = 0;
+  let polyDur = 0;
+  let prevT = events[0]!.t;
+
+  for (const ev of events) {
+    const dt = ev.t - prevT;
+    if (dt > 0) {
+      if (totalNotesActive >= 1) {
+        activeDur += dt;
+      }
+      if (pitchCounts.size >= 2) {
+        polyDur += dt;
+      }
+    }
+    totalNotesActive += ev.delta;
+    const prevCount = pitchCounts.get(ev.midi) ?? 0;
+    const nextCount = prevCount + ev.delta;
+    if (nextCount <= 0) {
+      pitchCounts.delete(ev.midi);
+    } else {
+      pitchCounts.set(ev.midi, nextCount);
+    }
+    prevT = ev.t;
+  }
+
+  return activeDur > 0 ? polyDur / activeDur : 0;
+}
+
+/** 計算音軌的音域、音符數與是否為和弦軌（異音重疊時間佔總發聲時間 > 10% 視為複音） */
 export function trackInfo(track: MidiTrack): TrackInfo {
   const { notes } = track;
   if (notes.length === 0) {
     return { low: 0, high: 0, noteCount: 0, polyphonic: false };
   }
-  const sorted = [...notes].sort(
-    (a, b) => a.start - b.start || a.midi - b.midi || a.end - b.end,
-  );
   let low = Infinity;
   let high = -Infinity;
-  let maxEnd = -Infinity;
-  let polyphonic = false;
 
-  for (const n of sorted) {
+  for (const n of notes) {
     if (n.midi < low) low = n.midi;
     if (n.midi > high) high = n.midi;
-    if (!polyphonic && maxEnd > -Infinity) {
-      const overlap = Math.min(maxEnd, n.end) - n.start;
-      if (overlap > POLYPHONIC_OVERLAP_SEC) {
-        polyphonic = true;
-      }
-    }
-    if (n.end > maxEnd) maxEnd = n.end;
   }
 
   return {
     low,
     high,
     noteCount: notes.length,
-    polyphonic,
+    polyphonic: trackOverlapRatio(track) > POLYPHONIC_OVERLAP_RATIO,
   };
 }
 
-/** 依「非和弦軌優先、音符數多優先」排序回傳候選旋律軌道索引 */
+const DEFAULT_TRACK_NAME_RE = /^旋律軌\s+\d+$/;
+const MELODY_NAME_RE =
+  /vocal|voice|vox|melody|lead|sing|主旋律|旋律|人聲|主唱|歌/i;
+const BACKING_NAME_RE = /backing|harmony|chorus|合音|和聲/i;
+const DRUM_NAME_RE = /\b(drums?|percussion|kit)\b|爵士鼓|鼓組/i;
+
+function isDrumTrack(track: MidiTrack): boolean {
+  return track.channel === 9;
+}
+
+function hasExplicitMelodyName(name: string): boolean {
+  const trimmed = name.trim();
+  if (!trimmed || DEFAULT_TRACK_NAME_RE.test(trimmed)) {
+    return false;
+  }
+  return MELODY_NAME_RE.test(trimmed);
+}
+
+function scoreMelodyTrack(track: MidiTrack): number {
+  const info = trackInfo(track);
+  if (info.noteCount === 0) {
+    return -Infinity;
+  }
+
+  let score = 0;
+  const trimmedName = track.name.trim();
+  if (hasExplicitMelodyName(trimmedName)) {
+    score += BACKING_NAME_RE.test(trimmedName) ? 700 : 1000;
+  } else if (trimmedName && DRUM_NAME_RE.test(trimmedName)) {
+    score -= 500;
+  }
+
+  // 重疊比例 <= 10%（單音）優先
+  if (!info.polyphonic) {
+    score += 200;
+  }
+
+  // 音域落在 C3–C6（MIDI 48–84）的比例
+  let inRange = 0;
+  for (const n of track.notes) {
+    if (n.midi >= 48 && n.midi <= 84) {
+      inRange += 1;
+    }
+  }
+  score += (inRange / info.noteCount) * 100;
+
+  // 音數適中加分（800 音以內隨音數遞增，超過 800 逐漸扣減過密伴奏軌）
+  const countScore =
+    info.noteCount <= 800
+      ? (info.noteCount / 800) * 40
+      : Math.max(0, 40 - ((info.noteCount - 800) / 1200) * 40);
+  score += countScore;
+
+  return score;
+}
+
+/** 依軌名關鍵字、單音特性、C3–C6 音域比例與音數適中度排序回傳候選旋律軌道索引（排除鼓軌） */
 export function melodyCandidates(asset: MidiAsset): number[] {
   return asset.tracks
-    .map((track) => ({ track, info: trackInfo(track) }))
+    .filter((track) => !isDrumTrack(track) && track.notes.length > 0)
+    .map((track) => ({ track, score: scoreMelodyTrack(track) }))
     .sort((a, b) => {
-      if (a.info.polyphonic !== b.info.polyphonic) {
-        return a.info.polyphonic ? 1 : -1;
-      }
-      if (a.info.noteCount !== b.info.noteCount) {
-        return b.info.noteCount - a.info.noteCount;
+      if (Math.abs(a.score - b.score) > 1e-9) {
+        return b.score - a.score;
       }
       return a.track.index - b.track.index;
     })
     .map((item) => item.track.index);
+}
+
+/** 推薦最適合練唱的主旋律軌道索引（排除鼓軌 channel 10；無可用軌時回傳 null） */
+export function suggestMelodyTrack(asset: MidiAsset): number | null {
+  return melodyCandidates(asset)[0] ?? null;
 }

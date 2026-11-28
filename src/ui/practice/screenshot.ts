@@ -6,6 +6,10 @@ import {
 import type { Key } from '../../core/key';
 import type { RepeatsPerKeyOption } from '../../state/settings';
 import type { NoteGlyph } from './layout';
+import type {
+  MidiJianpuMarker,
+  MidiJianpuUnderlineSegment,
+} from './midiLayout';
 
 export const SCREENSHOT_BG_COLOR = '#f6f4ee';
 const MAX_DPR = 3;
@@ -30,6 +34,9 @@ export interface ScreenshotLineInput {
   lineLabel: string | null;
   octaveTag: string | null;
   svgElement: SVGSVGElement | null;
+  extraJianpuMarkers?: readonly MidiJianpuMarker[];
+  underlineSegments?: readonly MidiJianpuUnderlineSegment[];
+  minNoteSpacingPx?: number;
 }
 
 export interface PracticeScreenshotParams {
@@ -267,17 +274,41 @@ function drawJianpuStripOnCanvas(
   ctx.restore();
 
   // 簡譜數字（水平對齊五線譜音符 x）
-  const digitSize = isTablet ? 38 : isPortrait ? 15 : 18;
-  const accSize = isTablet ? 20 : isPortrait ? 10 : 12;
+  const isMidi = Boolean(line.underlineSegments !== undefined || line.extraJianpuMarkers !== undefined);
+  const safeSpacing = line.minNoteSpacingPx ?? 40;
+  const digitSize = isMidi
+    ? Math.min(isTablet ? 24 : 16, Math.max(12, Math.floor(safeSpacing * 0.68)))
+    : isTablet
+      ? 38
+      : isPortrait
+        ? 15
+        : 18;
+  const accSize = isMidi
+    ? Math.max(9, Math.round(digitSize * 0.62))
+    : isTablet
+      ? 20
+      : isPortrait
+        ? 10
+        : 12;
+  const showSolfege = isTablet && (!isMidi || safeSpacing >= 38);
   const dotSize = isTablet ? 10 : 7;
   const solfegeSize = 12;
-  const baseBottomY = yOffset + jianpuHeight - 2;
+  const baseBottomY = yOffset + jianpuHeight - (isMidi ? 6 : 2);
 
   for (let idx = 0; idx < line.glyphs.length; idx++) {
     const g = line.glyphs[idx]!;
-    const jp = toJianpu(g.midi, line.lineKey, jianpuMode, line.lineTonicMidi);
-    const upDots = jp.octave > 0 ? jp.octave : 0;
-    const downDots = jp.octave < 0 ? Math.abs(jp.octave) : 0;
+    const isRest = Boolean(g.isRest);
+    const isDash = g.jianpuSymbol === '–';
+    const jp =
+      isRest || isDash
+        ? null
+        : toJianpu(g.midi, line.lineKey, jianpuMode, line.lineTonicMidi);
+    const upDots = jp && jp.octave > 0 ? jp.octave : 0;
+    const downDots = jp && jp.octave < 0 ? Math.abs(jp.octave) : 0;
+    const underlines = g.jianpuUnderlines ?? 0;
+    const digitText = isRest ? '0' : isDash ? '–' : jp!.digit;
+    const accText = jp?.accidental ?? '';
+    const dotSuffix = g.jianpuDot ? '·' : '';
 
     let color = '#2c2c2a';
     if (idx === line.activeNoteIdx) {
@@ -291,28 +322,45 @@ function drawJianpuStripOnCanvas(
 
     ctx.save();
     ctx.fillStyle = color;
+    ctx.strokeStyle = color;
     ctx.textAlign = 'center';
 
-    let digitCenterY = baseBottomY - (downDots > 0 ? dotSize * 0.85 : 0);
+    const underlinePad = underlines * (isTablet ? 3.5 : 2.5);
+    let digitCenterY =
+      baseBottomY - underlinePad - (downDots > 0 ? dotSize * 0.85 : 0);
     digitCenterY -= digitSize * 0.42;
 
-    if (jp.accidental) {
+    if (accText) {
       ctx.font = `700 ${digitSize}px ${fontStack}`;
-      const digitW = ctx.measureText(jp.digit).width;
+      const digitW = ctx.measureText(digitText + dotSuffix).width;
       ctx.font = `700 ${accSize}px ${fontStack}`;
-      const accW = ctx.measureText(jp.accidental).width;
+      const accW = ctx.measureText(accText).width;
       const totalW = accW + 1 + digitW;
       const startX = g.x - totalW / 2;
 
       ctx.textBaseline = 'middle';
       ctx.textAlign = 'left';
-      ctx.fillText(jp.accidental, startX, digitCenterY);
+      ctx.fillText(accText, startX, digitCenterY);
       ctx.font = `700 ${digitSize}px ${fontStack}`;
-      ctx.fillText(jp.digit, startX + accW + 1, digitCenterY);
+      ctx.fillText(digitText + dotSuffix, startX + accW + 1, digitCenterY);
     } else {
       ctx.font = `700 ${digitSize}px ${fontStack}`;
       ctx.textBaseline = 'middle';
-      ctx.fillText(jp.digit, g.x, digitCenterY);
+      ctx.fillText(digitText + dotSuffix, g.x, digitCenterY);
+    }
+
+    // 減時線（非 MIDI 或無連線段時畫單獨底線）
+    if (!line.underlineSegments && underlines > 0) {
+      const lineW = digitSize * 0.65;
+      ctx.lineWidth = isTablet ? 2 : 1.3;
+      const firstLineY = digitCenterY + digitSize * 0.48;
+      for (let u = 0; u < underlines; u++) {
+        const uy = firstLineY + u * (isTablet ? 3.5 : 2.5);
+        ctx.beginPath();
+        ctx.moveTo(g.x - lineW / 2, uy);
+        ctx.lineTo(g.x + lineW / 2, uy);
+        ctx.stroke();
+      }
     }
 
     // 上／下八度點
@@ -334,8 +382,8 @@ function drawJianpuStripOnCanvas(
       );
     }
 
-    // 平板顯示唱名
-    if (isTablet) {
+    // 平板顯示唱名（空間足夠時）
+    if (showSolfege && !isRest && !isDash) {
       const solfege = solfegeName(g.midi, line.lineKey, jianpuMode);
       if (solfege) {
         ctx.font = `600 ${solfegeSize}px ${fontStack}`;
@@ -348,6 +396,32 @@ function drawJianpuStripOnCanvas(
     }
 
     ctx.restore();
+  }
+
+  if (line.underlineSegments) {
+    for (const seg of line.underlineSegments) {
+      ctx.save();
+      ctx.strokeStyle = line.isCurrent && sec >= seg.endSec ? '#888780' : '#2c2c2a';
+      ctx.lineWidth = isTablet ? 1.8 : 1.4;
+      const uy = yOffset + jianpuHeight - (seg.level === 2 ? 1.5 : 4.5);
+      ctx.beginPath();
+      ctx.moveTo(seg.x1, uy);
+      ctx.lineTo(seg.x2, uy);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  if (line.extraJianpuMarkers) {
+    for (const m of line.extraJianpuMarkers) {
+      ctx.save();
+      ctx.fillStyle = line.isCurrent && sec >= m.t ? '#888780' : '#2c2c2a';
+      ctx.font = `700 ${digitSize}px ${fontStack}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(m.symbol, m.x, baseBottomY - digitSize * 0.42);
+      ctx.restore();
+    }
   }
 }
 

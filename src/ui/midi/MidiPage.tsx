@@ -4,25 +4,37 @@ import type { KeyConfidence } from '../../core/keyDetect';
 import {
   melodyCandidates,
   parseMidi,
+  suggestMelodyTrack,
   trackInfo,
   type MidiAsset,
 } from '../../core/midi';
 import {
   autoTransposeForRange,
   computeMidiBars,
+  defaultBarRangeForTrack,
   detectMelodyKey,
   sliceMelodyByBars,
   transposeKey,
 } from '../../core/midiExercise';
 import {
+  autoAssignTrackRoles,
+  findVocalTrackIndex,
+  isRhythmTrackCandidate,
+  resolveTrackRoles,
+  setTrackRole,
+} from '../../core/midiMix';
+import {
   createMidiStore,
+  DEFAULT_MIDI_MIXER,
   fnv1aHash,
   loadMidiSongSettings,
+  resolveMidiMixer,
   saveMidiSongSettings,
   stripMidiExtension,
   type MidiLibraryMeta,
   type MidiSongSettings,
   type MidiStore,
+  type MidiTrackRole,
 } from '../../state/midiLibrary';
 import {
   formatBpm,
@@ -31,6 +43,7 @@ import {
   type PracticeSettings,
 } from '../../state/settings';
 import { displayNoteNameInKey } from '../noteLabel';
+import { TrackMixModal } from './TrackMixModal';
 
 export interface MidiPracticeSource {
   id: string;
@@ -98,15 +111,25 @@ function formatImportDate(iso: string): string {
 }
 
 function defaultSongSettings(asset: MidiAsset): MidiSongSettings {
-  const candidates = melodyCandidates(asset);
+  const autoRoles = autoAssignTrackRoles(asset);
+  const recommendedIdx =
+    findVocalTrackIndex(autoRoles, asset) ?? suggestMelodyTrack(asset);
+  const trackIndex = recommendedIdx ?? asset.tracks[0]?.index ?? 0;
+  const track =
+    asset.tracks.find((t) => t.index === trackIndex) ?? asset.tracks[0];
   const bars = computeMidiBars(asset);
+  const range = track
+    ? defaultBarRangeForTrack(track, bars)
+    : { startBar: 1, endBar: Math.max(1, bars.length), skippedIntroBars: 0 };
   return {
-    trackIndex: candidates[0] ?? asset.tracks[0]?.index ?? 0,
-    startBar: 1,
-    endBar: Math.max(1, bars.length),
+    trackIndex,
+    startBar: range.startBar,
+    endBar: range.endBar,
     transposeSemitones: 0,
     speedPercent: 100,
     manualKey: null,
+    trackRoles: autoRoles,
+    mixer: { ...DEFAULT_MIDI_MIXER },
   };
 }
 
@@ -144,6 +167,12 @@ export function MidiPage({
   const [songSettings, setSongSettings] = useState<MidiSongSettings | null>(
     () => initialSource?.songSettings ?? null,
   );
+  const [trackMixOpen, setTrackMixOpen] = useState(false);
+  const [isInitialImportMix, setIsInitialImportMix] = useState(false);
+  const [draftTrackRoles, setDraftTrackRoles] = useState<Record<
+    number,
+    MidiTrackRole
+  > | null>(null);
 
   // 載入曲庫清單
   useEffect(() => {
@@ -175,10 +204,12 @@ export function MidiPage({
   const trackEntries = useMemo(() => {
     if (!activeItem) return [];
     const candidateOrder = melodyCandidates(activeItem.asset);
-    const recommendedIndex = candidateOrder[0];
+    const recommendedIndex =
+      suggestMelodyTrack(activeItem.asset) ?? candidateOrder[0];
     const orderMap = new Map<number, number>();
     candidateOrder.forEach((idx, rank) => orderMap.set(idx, rank));
     return [...activeItem.asset.tracks]
+      .filter((track) => !isRhythmTrackCandidate(track))
       .sort(
         (a, b) =>
           (orderMap.get(a.index) ?? 999) - (orderMap.get(b.index) ?? 999),
@@ -189,6 +220,24 @@ export function MidiPage({
         isRecommended: track.index === recommendedIndex,
       }));
   }, [activeItem]);
+
+  const resolvedTrackRoles = useMemo(() => {
+    if (!activeItem) return {};
+    return resolveTrackRoles(activeItem.asset, songSettings);
+  }, [activeItem, songSettings]);
+
+  const mixCounts = useMemo(() => {
+    let accomp = 0;
+    let rhythm = 0;
+    if (!activeItem) return { accomp, rhythm };
+    for (const t of activeItem.asset.tracks) {
+      if (t.notes.length === 0) continue;
+      const role = resolvedTrackRoles[t.index];
+      if (role === 'accompaniment') accomp++;
+      else if (role === 'rhythm') rhythm++;
+    }
+    return { accomp, rhythm };
+  }, [activeItem, resolvedTrackRoles]);
 
   const activeTrack = useMemo(() => {
     if (!activeItem || !songSettings) return null;
@@ -253,21 +302,37 @@ export function MidiPage({
       setLibrary(updatedList);
 
       const saved = loadMidiSongSettings(hash);
+      const isNewMixSetup = !saved?.trackRoles;
       const initial = saved ?? defaultSongSettings(asset);
       const maxBar = Math.max(1, computeMidiBars(asset).length);
+      const initialRoles = resolveTrackRoles(asset, initial);
+      const initialVocal =
+        findVocalTrackIndex(initialRoles, asset) ?? initial.trackIndex;
       const normalized: MidiSongSettings = {
         ...initial,
+        trackIndex: initialVocal,
         startBar: Math.max(1, Math.min(maxBar, initial.startBar)),
         endBar: Math.max(
           Math.max(1, Math.min(maxBar, initial.startBar)),
           Math.min(maxBar, initial.endBar),
         ),
+        mixer: resolveMidiMixer(initial),
       };
 
       setActiveItem({ id: hash, hash, name: file.name, asset });
       setSongSettings(normalized);
-      saveMidiSongSettings(hash, normalized);
       setConfirmDeleteId(null);
+
+      if (isNewMixSetup) {
+        setDraftTrackRoles(initialRoles);
+        setIsInitialImportMix(true);
+        setTrackMixOpen(true);
+      } else {
+        saveMidiSongSettings(hash, normalized);
+        setDraftTrackRoles(null);
+        setIsInitialImportMix(false);
+        setTrackMixOpen(false);
+      }
     } catch (err) {
       setImportError(err instanceof Error ? err.message : String(err));
     }
@@ -276,6 +341,9 @@ export function MidiPage({
   async function handleOpenEntry(meta: MidiLibraryMeta) {
     setImportError(null);
     setConfirmDeleteId(null);
+    setTrackMixOpen(false);
+    setIsInitialImportMix(false);
+    setDraftTrackRoles(null);
     try {
       const entry = await store.get(meta.id);
       if (!entry) {
@@ -297,6 +365,52 @@ export function MidiPage({
     }
   }
 
+  function handleOpenTrackMixModal() {
+    if (!activeItem || !songSettings) return;
+    setDraftTrackRoles(resolveTrackRoles(activeItem.asset, songSettings));
+    setIsInitialImportMix(false);
+    setTrackMixOpen(true);
+  }
+
+  function handleChangeDraftRole(trackIndex: number, nextRole: MidiTrackRole) {
+    setDraftTrackRoles((prev) =>
+      setTrackRole(prev ?? resolvedTrackRoles, trackIndex, nextRole),
+    );
+  }
+
+  function handleTrackMixDone() {
+    if (!activeItem || !songSettings) return;
+    const finalRoles = draftTrackRoles ?? resolvedTrackRoles;
+    const nextVocalIdx =
+      findVocalTrackIndex(finalRoles, activeItem.asset) ??
+      songSettings.trackIndex;
+    let nextStart = songSettings.startBar;
+    let nextEnd = songSettings.endBar;
+    if (nextVocalIdx !== songSettings.trackIndex) {
+      const nextTrack = activeItem.asset.tracks.find(
+        (t) => t.index === nextVocalIdx,
+      );
+      if (nextTrack) {
+        const range = defaultBarRangeForTrack(nextTrack, bars);
+        nextStart = range.startBar;
+        nextEnd = range.endBar;
+      }
+    }
+    const nextSettings: MidiSongSettings = {
+      ...songSettings,
+      trackIndex: nextVocalIdx,
+      startBar: nextStart,
+      endBar: nextEnd,
+      trackRoles: finalRoles,
+      mixer: resolveMidiMixer(songSettings),
+    };
+    setSongSettings(nextSettings);
+    saveMidiSongSettings(activeItem.hash, nextSettings);
+    setTrackMixOpen(false);
+    setIsInitialImportMix(false);
+    setDraftTrackRoles(null);
+  }
+
   async function handleDeleteEntry(id: string) {
     await store.delete(id);
     const updatedList = await store.list();
@@ -316,13 +430,18 @@ export function MidiPage({
 
   function handleStart() {
     if (!activeItem || !songSettings) return;
-    saveMidiSongSettings(activeItem.hash, songSettings);
+    const finalized: MidiSongSettings = {
+      ...songSettings,
+      trackRoles: resolveTrackRoles(activeItem.asset, songSettings),
+      mixer: resolveMidiMixer(songSettings),
+    };
+    saveMidiSongSettings(activeItem.hash, finalized);
     onStartMidiPractice({
       id: activeItem.id,
       hash: activeItem.hash,
       name: activeItem.name,
       asset: activeItem.asset,
-      songSettings,
+      songSettings: finalized,
     });
   }
 
@@ -438,10 +557,14 @@ export function MidiPage({
 
       {/* 右欄：曲目練唱設定 */}
       <section className="midi-detail" aria-label="MIDI 練唱設定">
-        {!activeItem || !songSettings ? (
+        {!activeItem || !songSettings || (trackMixOpen && isInitialImportMix) ? (
           <div className="midi-empty-detail">
             <h2>MIDI 練唱</h2>
-            <p>請從左側匯入 .mid 檔，或選擇已保存的曲目進行設定。</p>
+            <p>
+              {trackMixOpen && isInitialImportMix
+                ? '請先完成分軌設定，按「完成」進入練唱設定。'
+                : '請從左側匯入 .mid 檔，或選擇已保存的曲目進行設定。'}
+            </p>
           </div>
         ) : (
           <div className="midi-settings-card">
@@ -454,28 +577,64 @@ export function MidiPage({
                   共 {bars.length} 小節 · 區間 {sliced?.notes.length ?? 0} 個旋律音符
                 </p>
               </div>
-              <button
-                type="button"
-                className="midi-start-btn"
-                disabled={!sliced || sliced.notes.length === 0}
-                onClick={handleStart}
-              >
-                開始練唱
-              </button>
+              <div className="midi-head-actions">
+                <button
+                  type="button"
+                  className="midi-track-mix-btn"
+                  onClick={handleOpenTrackMixModal}
+                >
+                  分軌
+                </button>
+                <button
+                  type="button"
+                  className="midi-start-btn"
+                  disabled={!sliced || sliced.notes.length === 0}
+                  onClick={handleStart}
+                >
+                  開始練唱
+                </button>
+              </div>
             </div>
 
             {/* 1. 旋律軌 */}
             <div className="setting-row setting-row-stack">
-              <label className="setting-label" htmlFor="midi-track-select">
-                旋律軌
-              </label>
+              <div className="setting-row-inline-head">
+                <label className="setting-label" htmlFor="midi-track-select">
+                  主唱旋律軌
+                </label>
+                <span className="setting-value-badge">
+                  伴奏 {mixCounts.accomp} 軌 · 節奏 {mixCounts.rhythm} 軌
+                </span>
+              </div>
               <select
                 id="midi-track-select"
                 className="midi-select"
                 value={songSettings.trackIndex}
-                onChange={(e) =>
-                  updateSongSettings({ trackIndex: Number(e.target.value) })
-                }
+                onChange={(e) => {
+                  const nextTrackIndex = Number(e.target.value);
+                  const nextTrack = activeItem.asset.tracks.find(
+                    (t) => t.index === nextTrackIndex,
+                  );
+                  const nextRoles = setTrackRole(
+                    resolvedTrackRoles,
+                    nextTrackIndex,
+                    'vocal',
+                  );
+                  if (nextTrack) {
+                    const range = defaultBarRangeForTrack(nextTrack, bars);
+                    updateSongSettings({
+                      trackIndex: nextTrackIndex,
+                      startBar: range.startBar,
+                      endBar: range.endBar,
+                      trackRoles: nextRoles,
+                    });
+                  } else {
+                    updateSongSettings({
+                      trackIndex: nextTrackIndex,
+                      trackRoles: nextRoles,
+                    });
+                  }
+                }}
               >
                 {trackEntries.map(({ track, info, isRecommended }) => {
                   const trackNum = track.index + 1;
@@ -502,21 +661,28 @@ export function MidiPage({
             <div className="setting-row setting-row-stack">
               <div className="setting-row-inline-head">
                 <span className="setting-label">A–B 小節區間</span>
-                {(songSettings.startBar !== 1 ||
-                  songSettings.endBar !== bars.length) && (
-                  <button
-                    type="button"
-                    className="midi-inline-link"
-                    onClick={() =>
-                      updateSongSettings({
-                        startBar: 1,
-                        endBar: Math.max(1, bars.length),
-                      })
-                    }
-                  >
-                    重設整首
-                  </button>
-                )}
+                <div className="midi-range-head-actions">
+                  {songSettings.startBar > 1 && (
+                    <span className="setting-value-badge">
+                      已略過前奏 {songSettings.startBar - 1} 小節
+                    </span>
+                  )}
+                  {(songSettings.startBar !== 1 ||
+                    songSettings.endBar !== bars.length) && (
+                    <button
+                      type="button"
+                      className="midi-inline-link"
+                      onClick={() =>
+                        updateSongSettings({
+                          startBar: 1,
+                          endBar: Math.max(1, bars.length),
+                        })
+                      }
+                    >
+                      重設整首
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="midi-bar-range">
                 <label className="midi-bar-field">
@@ -760,6 +926,20 @@ export function MidiPage({
           </div>
         )}
       </section>
+
+      {activeItem && songSettings && (
+        <TrackMixModal
+          open={trackMixOpen}
+          songTitle={stripMidiExtension(activeItem.name)}
+          asset={activeItem.asset}
+          bars={bars}
+          roles={draftTrackRoles ?? resolvedTrackRoles}
+          originalKey={originalKey}
+          a4={settings.a4}
+          onChangeRole={handleChangeDraftRole}
+          onDone={handleTrackMixDone}
+        />
+      )}
     </div>
   );
 }

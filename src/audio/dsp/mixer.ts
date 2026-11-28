@@ -1,4 +1,6 @@
 import { MetronomeClick } from './click';
+import { DrumSynth } from './drums';
+import { AccompSynth } from './instruments';
 import { AdditivePiano } from './piano';
 import type { SchedEvent } from './schedule';
 import { GlideVoice } from './voice';
@@ -11,7 +13,9 @@ export type GainBus =
   | 'cadence'
   | 'click'
   | 'metro'
-  | 'keys';
+  | 'keys'
+  | 'accomp'
+  | 'rhythm';
 
 export interface MixerState {
   playing: boolean;
@@ -27,6 +31,8 @@ export interface MixerState {
   padPiano: AdditivePiano;
   cadencePiano: AdditivePiano;
   keysPiano: AdditivePiano;
+  accompSynth: AccompSynth;
+  drumSynth: DrumSynth;
   melodyVoice: GlideVoice;
   melodySingVoice: GlideVoice;
   clickSynth: MetronomeClick;
@@ -35,6 +41,8 @@ export interface MixerState {
   bufMelodySing: Float32Array;
   bufPad: Float32Array;
   bufCadence: Float32Array;
+  bufAccomp: Float32Array;
+  bufRhythm: Float32Array;
   bufClick: Float32Array;
   bufMetro: Float32Array;
   bufKeys: Float32Array;
@@ -65,6 +73,8 @@ export function createMixerState(
       click: 0.8,
       metro: 1,
       keys: 1,
+      accomp: 0.6,
+      rhythm: 0.5,
     },
     muteKeys: false,
     melodyPiano: new AdditivePiano(rate),
@@ -72,6 +82,8 @@ export function createMixerState(
     padPiano: new AdditivePiano(rate),
     cadencePiano: new AdditivePiano(rate),
     keysPiano: new AdditivePiano(rate),
+    accompSynth: new AccompSynth(rate),
+    drumSynth: new DrumSynth(rate),
     melodyVoice: new GlideVoice(rate),
     melodySingVoice: new GlideVoice(rate),
     clickSynth: new MetronomeClick(rate),
@@ -80,6 +92,8 @@ export function createMixerState(
     bufMelodySing: new Float32Array(bufSize),
     bufPad: new Float32Array(bufSize),
     bufCadence: new Float32Array(bufSize),
+    bufAccomp: new Float32Array(bufSize),
+    bufRhythm: new Float32Array(bufSize),
     bufClick: new Float32Array(bufSize),
     bufMetro: new Float32Array(bufSize),
     bufKeys: new Float32Array(bufSize),
@@ -92,6 +106,8 @@ export function stopExerciseVoices(state: MixerState): void {
   state.melodySingPiano.allOff();
   state.padPiano.allOff();
   state.cadencePiano.allOff();
+  state.accompSynth.allOff();
+  state.drumSynth.allOff();
   state.melodyVoice.allOff();
   state.melodySingVoice.allOff();
   state.clickSynth.allOff();
@@ -107,6 +123,14 @@ function dispatchEvent(state: MixerState, ev: SchedEvent): void {
         state.melodySingPiano.on(ev.id, ev.hz, ev.held);
       } else if (ev.bus === 'pad') {
         state.padPiano.on(ev.id, ev.hz, ev.held);
+      } else if (ev.bus === 'accomp') {
+        state.accompSynth.on(
+          ev.id,
+          ev.hz,
+          ev.timbre ?? 'piano',
+          ev.velocity ?? 1,
+          ev.held,
+        );
       } else {
         state.cadencePiano.on(ev.id, ev.hz, ev.held);
       }
@@ -120,6 +144,8 @@ function dispatchEvent(state: MixerState, ev: SchedEvent): void {
         state.melodySingVoice.stop(ev.id);
       } else if (ev.bus === 'pad') {
         state.padPiano.off(ev.id);
+      } else if (ev.bus === 'accomp') {
+        state.accompSynth.off(ev.id);
       } else {
         state.cadencePiano.off(ev.id);
       }
@@ -138,6 +164,9 @@ function dispatchEvent(state: MixerState, ev: SchedEvent): void {
         state.clickSynth.trigger(ev.accent);
       }
       break;
+    case 'drum':
+      state.drumSynth.trigger(ev.drum, ev.velocity, ev.midi);
+      break;
   }
 }
 
@@ -149,6 +178,8 @@ function ensureBufferCapacity(state: MixerState, frames: number): void {
   state.bufMelodySing = new Float32Array(frames);
   state.bufPad = new Float32Array(frames);
   state.bufCadence = new Float32Array(frames);
+  state.bufAccomp = new Float32Array(frames);
+  state.bufRhythm = new Float32Array(frames);
   state.bufClick = new Float32Array(frames);
   state.bufMetro = new Float32Array(frames);
   state.bufKeys = new Float32Array(frames);
@@ -172,6 +203,8 @@ export function renderBlock(
       bufMelodySing,
       bufPad,
       bufCadence,
+      bufAccomp,
+      bufRhythm,
       bufClick,
       bufMetro,
       events,
@@ -181,6 +214,8 @@ export function renderBlock(
     bufMelodySing.fill(0, 0, frames);
     bufPad.fill(0, 0, frames);
     bufCadence.fill(0, 0, frames);
+    bufAccomp.fill(0, 0, frames);
+    bufRhythm.fill(0, 0, frames);
     bufClick.fill(0, 0, frames);
     bufMetro.fill(0, 0, frames);
 
@@ -211,6 +246,8 @@ export function renderBlock(
       state.melodySingVoice.render(bufMelodySing, pos, chunk);
       state.padPiano.render(bufPad, pos, chunk);
       state.cadencePiano.render(bufCadence, pos, chunk);
+      state.accompSynth.render(bufAccomp, pos, chunk);
+      state.drumSynth.render(bufRhythm, pos, chunk);
       state.clickSynth.render(bufClick, pos, chunk);
       state.metroSynth.render(bufMetro, pos, chunk);
 
@@ -222,6 +259,8 @@ export function renderBlock(
     const gMelSing = gains.melodySing;
     const gPad = gains.pad;
     const gCad = gains.cadence;
+    const gAcc = gains.accomp;
+    const gRhy = gains.rhythm;
     const gClk = gains.click;
     const gMet = gains.metro;
 
@@ -231,6 +270,8 @@ export function renderBlock(
         bufMelodySing[i]! * gMelSing +
         bufPad[i]! * gPad +
         bufCadence[i]! * gCad +
+        bufAccomp[i]! * gAcc +
+        bufRhythm[i]! * gRhy +
         bufClick[i]! * gClk +
         bufMetro[i]! * gMet;
     }

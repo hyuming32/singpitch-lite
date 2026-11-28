@@ -1,6 +1,7 @@
 import type { Exercise, NoteEvent } from '../../core/exercise';
 import type { JianpuAccidental } from '../../core/jianpu';
 import { keyName, type Key } from '../../core/key';
+import type { NoteDurationType } from '../../core/midiScore';
 import {
   keySignaturePositions,
   staffPosition,
@@ -13,6 +14,7 @@ export interface PassWindow {
   keyIndex: number;
   pass: number;
   phase: 'listen' | 'sing';
+  isShadow?: boolean;
   start: number;
   end: number;
 }
@@ -21,6 +23,7 @@ export interface ScoreLine {
   keyIndex: number;
   pass: number;
   phase: 'listen' | 'sing';
+  isShadow?: boolean;
   /** 該遍音符陣列中的半開區間 [startIdx, endIdx) */
   noteRange: readonly [number, number];
   start: number;
@@ -45,6 +48,21 @@ export interface NoteGlyph {
   start: number;
   dur: number;
   endMidi?: number;
+  /** 影子模式空拍（不發聲，譜上畫空心音符） */
+  silent?: boolean;
+  /** MIDI 樂譜擴充欄位（音階與影子模式不使用） */
+  isRest?: boolean;
+  durationType?: NoteDurationType;
+  dotted?: boolean;
+  tieFromPrev?: boolean;
+  tieToNext?: boolean;
+  barNumber?: number;
+  beatIndex?: number;
+  beamed?: boolean;
+  beamGroupId?: number;
+  jianpuUnderlines?: 0 | 1 | 2;
+  jianpuDot?: boolean;
+  jianpuSymbol?: '–';
 }
 
 export interface StaffVerticalMetrics {
@@ -60,27 +78,37 @@ export function listPassWindows(ex: Exercise): PassWindow[] {
     return [];
   }
 
+  const shadowPassKeys = new Set<string>();
+  for (const n of ex.notes) {
+    if (n.silent) {
+      shadowPassKeys.add(`${n.keyIndex}:${n.pass}`);
+    }
+  }
+
   const groups: {
     keyIndex: number;
     pass: number;
     phase: 'listen' | 'sing';
+    isShadow: boolean;
     notes: NoteEvent[];
   }[] = [];
 
   for (const n of ex.notes) {
+    const isShadowPass = shadowPassKeys.has(`${n.keyIndex}:${n.pass}`);
     const last = groups[groups.length - 1];
     if (
       last &&
       last.keyIndex === n.keyIndex &&
       last.pass === n.pass &&
-      last.phase === n.phase
+      (isShadowPass || last.phase === n.phase)
     ) {
       last.notes.push(n);
     } else {
       groups.push({
         keyIndex: n.keyIndex,
         pass: n.pass,
-        phase: n.phase,
+        phase: isShadowPass ? 'sing' : n.phase,
+        isShadow: isShadowPass,
         notes: [n],
       });
     }
@@ -103,10 +131,29 @@ export function listPassWindows(ex: Exercise): PassWindow[] {
       keyIndex: g.keyIndex,
       pass: g.pass,
       phase: g.phase,
+      ...(g.isShadow ? { isShadow: true } : {}),
       start,
       end: Math.max(end, start + 0.01),
     };
   });
+}
+
+/** 取得指定顯示視窗內的所有音符（影子模式包含交錯的示範音與空拍） */
+export function notesForWindow(
+  ex: Exercise,
+  win: Pick<PassWindow, 'keyIndex' | 'pass' | 'phase' | 'isShadow'>,
+): NoteEvent[] {
+  if (win.isShadow) {
+    return ex.notes.filter(
+      (n) => n.keyIndex === win.keyIndex && n.pass === win.pass,
+    );
+  }
+  return ex.notes.filter(
+    (n) =>
+      n.keyIndex === win.keyIndex &&
+      n.pass === win.pass &&
+      n.phase === win.phase,
+  );
 }
 
 /** 取得指定秒數所在的練唱視窗；若在預備拍或換調空檔則回傳最接近的目標視窗 */
@@ -223,7 +270,7 @@ export function computeStaffMetrics(
 /** 計算目前視窗內每個音符的五線譜繪製資料 */
 export function noteGlyphs(
   ex: Exercise,
-  win: Pick<PassWindow, 'keyIndex' | 'pass' | 'phase' | 'start' | 'end'>,
+  win: Pick<PassWindow, 'keyIndex' | 'pass' | 'phase' | 'isShadow' | 'start' | 'end'>,
   key: Key,
   clef: Clef,
   width: number,
@@ -235,12 +282,7 @@ export function noteGlyphs(
   const left = leftPad ?? staffLeftPad(key, clef, lineSpacing);
   const right = Math.max(left + 1, width - rightPad);
 
-  const allWinNotes = ex.notes.filter(
-    (n) =>
-      n.keyIndex === win.keyIndex &&
-      n.pass === win.pass &&
-      n.phase === win.phase,
-  );
+  const allWinNotes = notesForWindow(ex, win);
   const winNotes = noteRange
     ? allWinNotes.slice(noteRange[0], noteRange[1])
     : allWinNotes;
@@ -264,6 +306,7 @@ export function noteGlyphs(
       start: n.start,
       dur: n.dur,
       ...(n.endMidi !== undefined ? { endMidi: n.endMidi } : {}),
+      ...(n.silent ? { silent: true } : {}),
     };
   });
 }
@@ -399,6 +442,7 @@ interface InternalSegment {
   keyIndex: number;
   pass: number;
   phase: 'listen' | 'sing';
+  isShadow?: boolean;
   noteRange: readonly [number, number];
   start: number;
   end: number;
@@ -443,17 +487,13 @@ export function scoreLines(
   }
 
   if (maxLines <= 1) {
-    const count = ex.notes.filter(
-      (n) =>
-        n.keyIndex === activeWin.keyIndex &&
-        n.pass === activeWin.pass &&
-        n.phase === activeWin.phase,
-    ).length;
+    const count = notesForWindow(ex, activeWin).length;
     return [
       {
         keyIndex: activeWin.keyIndex,
         pass: activeWin.pass,
         phase: activeWin.phase,
+        ...(activeWin.isShadow ? { isShadow: true } : {}),
         noteRange: [0, count],
         start: activeWin.start,
         end: activeWin.end,
@@ -466,10 +506,8 @@ export function scoreLines(
 
   const segments: InternalSegment[] = [];
   for (const w of windows) {
-    const winNotes = ex.notes.filter(
-      (n) =>
-        n.keyIndex === w.keyIndex && n.pass === w.pass && n.phase === w.phase,
-    );
+    const winNotes = notesForWindow(ex, w);
+    const shadowProp = w.isShadow ? { isShadow: true } : {};
     if (winNotes.length > LONG_PASS_NOTE_THRESHOLD) {
       const mid = Math.ceil(winNotes.length / 2);
       const splitTime = Math.max(w.start + 0.005, winNotes[mid]!.start);
@@ -477,6 +515,7 @@ export function scoreLines(
         keyIndex: w.keyIndex,
         pass: w.pass,
         phase: w.phase,
+        ...shadowProp,
         noteRange: [0, mid],
         start: w.start,
         end: splitTime,
@@ -486,6 +525,7 @@ export function scoreLines(
         keyIndex: w.keyIndex,
         pass: w.pass,
         phase: w.phase,
+        ...shadowProp,
         noteRange: [mid, winNotes.length],
         start: splitTime,
         end: Math.max(w.end, splitTime + 0.01),
@@ -496,6 +536,7 @@ export function scoreLines(
         keyIndex: w.keyIndex,
         pass: w.pass,
         phase: w.phase,
+        ...shadowProp,
         noteRange: [0, winNotes.length],
         start: w.start,
         end: w.end,
@@ -586,10 +627,8 @@ function buildSegmentsForPass(
   ex: Exercise,
   w: PassWindow,
 ): InternalSegment[] {
-  const winNotes = ex.notes.filter(
-    (n) =>
-      n.keyIndex === w.keyIndex && n.pass === w.pass && n.phase === w.phase,
-  );
+  const winNotes = notesForWindow(ex, w);
+  const shadowProp = w.isShadow ? { isShadow: true } : {};
   const counts = splitNotesIntoPortraitLines(winNotes.length);
   if (counts.length === 0) {
     return [
@@ -597,6 +636,7 @@ function buildSegmentsForPass(
         keyIndex: w.keyIndex,
         pass: w.pass,
         phase: w.phase,
+        ...shadowProp,
         noteRange: [0, 0],
         start: w.start,
         end: w.end,
@@ -623,6 +663,7 @@ function buildSegmentsForPass(
       keyIndex: w.keyIndex,
       pass: w.pass,
       phase: w.phase,
+      ...shadowProp,
       noteRange: [startOffset, endOffset],
       start: prevEnd,
       end: endTime,

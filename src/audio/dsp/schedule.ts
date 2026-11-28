@@ -1,4 +1,10 @@
 import type { Exercise } from '../../core/exercise';
+import type {
+  AccompNoteEvent,
+  DrumSound,
+  RhythmHitEvent,
+  SynthTimbre,
+} from '../../core/midiMix';
 import { midiToHz } from '../../core/notes';
 
 export type SchedBus =
@@ -7,7 +13,9 @@ export type SchedBus =
   | 'pad'
   | 'cadence'
   | 'click'
-  | 'metro';
+  | 'metro'
+  | 'accomp'
+  | 'rhythm';
 
 export type SchedEvent =
   | {
@@ -16,13 +24,15 @@ export type SchedEvent =
       id: string;
       hz: number;
       held: boolean;
-      bus: 'melody' | 'melodySing' | 'pad' | 'cadence';
+      bus: 'melody' | 'melodySing' | 'pad' | 'cadence' | 'accomp';
+      timbre?: SynthTimbre;
+      velocity?: number;
     }
   | {
       frame: number;
       type: 'noteOff';
       id: string;
-      bus: 'melody' | 'melodySing' | 'pad' | 'cadence';
+      bus: 'melody' | 'melodySing' | 'pad' | 'cadence' | 'accomp';
     }
   | {
       frame: number;
@@ -38,6 +48,14 @@ export type SchedEvent =
       type: 'click';
       accent: boolean;
       bus: 'click' | 'metro';
+    }
+  | {
+      frame: number;
+      type: 'drum';
+      drum: DrumSound;
+      midi: number;
+      velocity: number;
+      bus: 'rhythm';
     };
 
 export interface CompileOptions {
@@ -50,6 +68,14 @@ export interface CompileOptions {
   beatClicks?: boolean;
   /** 練習速度（BPM），供 beatClicks 計算拍長；未提供時由 ex.clicks 推算 */
   bpm?: number;
+  /** MIDI 伴奏音符事件 */
+  accompNotes?: readonly AccompNoteEvent[];
+  /** MIDI 節奏組鼓點事件 */
+  rhythmHits?: readonly RhythmHitEvent[];
+  /** 伴奏組開關（false 時不產生伴奏事件，預設 true） */
+  accompEnabled?: boolean;
+  /** 節奏組開關（false 時不產生鼓組事件，預設 true） */
+  rhythmEnabled?: boolean;
 }
 
 export interface CompiledExercise {
@@ -137,14 +163,20 @@ export function compileExercise(
     click = true,
     beatClicks = false,
     bpm,
+    accompNotes,
+    rhythmHits,
+    accompEnabled = true,
+    rhythmEnabled = true,
   } = opts;
 
   const events: SchedEvent[] = [];
 
-  // 練習音符與滑音
+  // 練習音符與滑音（影子模式空拍 silent: true 一律不發聲；alwaysPlay 不受 pianoDuringSing=false 影響）
   for (let i = 0; i < ex.notes.length; i++) {
     const note = ex.notes[i]!;
-    const shouldPlay = note.phase === 'listen' || pianoDuringSing;
+    const shouldPlay =
+      !note.silent &&
+      (note.phase === 'listen' || Boolean(note.alwaysPlay) || pianoDuringSing);
     if (!shouldPlay) {
       continue;
     }
@@ -152,7 +184,10 @@ export function compileExercise(
     const startFrame = Math.round(note.start * rate);
     const endFrame = Math.round((note.start + note.dur) * rate);
     const id = `ex:${i}`;
-    const melodyBus = note.phase === 'sing' ? 'melodySing' : 'melody';
+    const melodyBus =
+      note.phase === 'sing' && !(note.alwaysPlay && !pianoDuringSing)
+        ? 'melodySing'
+        : 'melody';
 
     if (note.endMidi !== undefined && voiceForGlide) {
       events.push({
@@ -267,6 +302,51 @@ export function compileExercise(
     }
   }
 
+  // 伴奏音符（依原時間、velocity、音色走 'accomp' 匯流排）
+  if (accompEnabled && accompNotes && accompNotes.length > 0) {
+    for (let ai = 0; ai < accompNotes.length; ai++) {
+      const an = accompNotes[ai]!;
+      const startFrame = Math.max(0, Math.round(an.start * rate));
+      const endFrame = Math.max(
+        startFrame + 1,
+        Math.round((an.start + an.dur) * rate),
+      );
+      const id = `acc:${an.trackIndex}:${ai}`;
+      events.push({
+        frame: startFrame,
+        type: 'noteOn',
+        id,
+        hz: midiToHz(an.midi, a4),
+        held: false,
+        bus: 'accomp',
+        timbre: an.timbre,
+        velocity: an.velocity,
+      });
+      events.push({
+        frame: endFrame,
+        type: 'noteOff',
+        id,
+        bus: 'accomp',
+      });
+    }
+  }
+
+  // 節奏組鼓點（不移調，走 'rhythm' 匯流排）
+  if (rhythmEnabled && rhythmHits && rhythmHits.length > 0) {
+    for (let ri = 0; ri < rhythmHits.length; ri++) {
+      const rh = rhythmHits[ri]!;
+      const frame = Math.max(0, Math.round(rh.start * rate));
+      events.push({
+        frame,
+        type: 'drum',
+        drum: rh.drum,
+        midi: rh.midi,
+        velocity: rh.velocity,
+        bus: 'rhythm',
+      });
+    }
+  }
+
   // 依 frame 排序，同 frame 時 noteOff 排在前面
   events.sort((a, b) => {
     if (a.frame !== b.frame) {
@@ -279,4 +359,37 @@ export function compileExercise(
 
   const totalFrames = Math.round(ex.total * rate);
   return { events, totalFrames };
+}
+
+/** 每次傳送至 AudioWorklet 的排程事件批次上限與預讀時間（秒） */
+export const SCHED_CHUNK_SIZE = 512;
+export const SCHED_LOOKAHEAD_SEC = 15;
+
+export interface EventBatchSlice {
+  batch: SchedEvent[];
+  nextCursor: number;
+  lastFrame: number;
+}
+
+/** 由完整排序事件表中取出下一批（最多 chunkSize 筆）送往 AudioWorklet */
+export function takeNextEventBatch(
+  events: readonly SchedEvent[],
+  cursor: number,
+  chunkSize = SCHED_CHUNK_SIZE,
+): EventBatchSlice {
+  if (cursor >= events.length || chunkSize <= 0) {
+    return {
+      batch: [],
+      nextCursor: cursor,
+      lastFrame: events.length > 0 ? events[events.length - 1]!.frame : 0,
+    };
+  }
+  const end = Math.min(events.length, cursor + chunkSize);
+  const batch = events.slice(cursor, end);
+  const lastFrame = batch[batch.length - 1]!.frame;
+  return {
+    batch,
+    nextCursor: end,
+    lastFrame,
+  };
 }

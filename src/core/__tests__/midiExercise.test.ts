@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import { compileExercise } from '../../audio/dsp/schedule';
 import { melodyCandidates, parseMidi, type MidiAsset, type MidiNote } from '../midi';
 import {
   autoTransposeForRange,
   buildMidiExercise,
   computeMidiBars,
+  defaultBarRangeForTrack,
   extractMelodyNotes,
   sliceMelodyByBars,
   transposeKey,
@@ -208,5 +210,79 @@ describe('buildMidiExercise', () => {
       tonicPc: 9,
       mode: 'minor',
     });
+  });
+
+  it('defaultBarRangeForTrack 自動略過前奏與尾奏空白小節', () => {
+    // 120 BPM 4/4（每小節 2 秒），前 3 小節空白，第 4 小節後半（7.5s）起唱到第 6 小節（11.5s），後面還有一段尾奏（至 16s）
+    const notes: MidiNote[] = [
+      makeNote(7.5, 8.0, 64),
+      makeNote(8.0, 9.0, 67),
+      makeNote(10.5, 11.5, 69),
+    ];
+    const asset: MidiAsset = {
+      tracks: [{ index: 0, name: 'Vocal', notes }],
+      duration: 16.0,
+      ticksPerBeat: 120,
+      beats: Array.from({ length: 32 }, (_, i) => [i * 0.5, i % 4, 120]),
+    };
+    const bars = computeMidiBars(asset);
+    expect(bars).toHaveLength(8);
+    expect(defaultBarRangeForTrack(asset.tracks[0]!, bars)).toEqual({
+      startBar: 4,
+      endBar: 6,
+      skippedIntroBars: 3,
+    });
+  });
+
+  it('MIDI 跟唱 compileExercise 後 noteOn 數等於區間音數（即使 pianoDuringSing=false）；先聽再唱維持示範彈、唱遍依設定', () => {
+    const asset = makeSimpleAsset(
+      [
+        makeNote(0.0, 0.5, 60),
+        makeNote(0.5, 1.0, 62),
+        makeNote(1.0, 1.5, 64),
+        makeNote(1.5, 2.0, 67),
+        makeNote(2.0, 2.5, 69),
+      ],
+      120,
+      4,
+    );
+
+    const followRes = buildMidiExercise(asset, {
+      trackIndex: 0,
+      startBar: 1,
+      endBar: 2,
+      mode: 'follow',
+      repeats: 1,
+      countIn: true,
+    });
+    const compiledFollow = compileExercise(followRes.exercise, 48000, {
+      pianoDuringSing: false,
+      click: true,
+      beatClicks: false,
+    });
+    const followNoteOns = compiledFollow.events.filter((e) => e.type === 'noteOn');
+    expect(followNoteOns).toHaveLength(5);
+
+    const listenSingRes = buildMidiExercise(asset, {
+      trackIndex: 0,
+      startBar: 1,
+      endBar: 2,
+      mode: 'listen-then-sing',
+      repeats: 1,
+      countIn: true,
+    });
+    const compiledListenOnly = compileExercise(listenSingRes.exercise, 48000, {
+      pianoDuringSing: false,
+      click: true,
+      beatClicks: false,
+    });
+    const listenOns = compiledListenOnly.events.filter(
+      (e) => e.type === 'noteOn' && e.bus === 'melody',
+    );
+    const singOns = compiledListenOnly.events.filter(
+      (e) => e.type === 'noteOn' && e.bus === 'melodySing',
+    );
+    expect(listenOns).toHaveLength(5);
+    expect(singOns).toHaveLength(0);
   });
 });

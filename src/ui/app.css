@@ -1359,6 +1359,7 @@ button:disabled {
 }
 
 .practice-page {
+  position: relative;
   flex: 1;
   height: 100%;
   min-height: 0;
@@ -1711,6 +1712,80 @@ button:disabled {
   color: var(--text);
 }
 
+.practice-mode-btn.is-shadow {
+  border-color: #15803d;
+  background-color: #dcfce7;
+  color: #14532d;
+}
+
+.jianpu-strip-item.is-shadow-gap {
+  opacity: 0.72;
+}
+
+.jianpu-strip-item.is-shadow-gap.is-current {
+  opacity: 1;
+}
+
+.jianpu-strip-item.is-shadow-gap .jianpu-strip-digit {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.shadow-pass-summary-banner,
+.shadow-mic-hint-banner {
+  position: relative;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px;
+  margin: 0 12px 6px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.shadow-pass-summary-banner {
+  justify-content: center;
+  background-color: #f0fdf4;
+  border: 1px solid #86efac;
+  color: #14532d;
+}
+
+.shadow-mic-hint-banner {
+  background-color: #fffbeb;
+  border: 1px solid #fcd34d;
+  color: #78350f;
+}
+
+.shadow-mic-hint-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.shadow-mic-hint-btn {
+  border: 1px solid #d97706;
+  background-color: #f59e0b;
+  color: #ffffff;
+  border-radius: 6px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.shadow-mic-hint-close {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
 .practice-page.is-portrait .practice-mode-btn.is-compact {
   height: 39px;
   padding: 0 8px;
@@ -1867,6 +1942,10 @@ button:disabled {
   z-index: 3;
 }
 
+.score-playhead.is-midi {
+  border-left: 2px solid #185fa5;
+}
+
 /* 簡譜帶 */
 .jianpu-strip {
   position: relative;
@@ -1955,6 +2034,41 @@ button:disabled {
   user-select: none;
 }
 
+.jianpu-strip.is-midi .jianpu-strip-item {
+  bottom: 7px;
+}
+
+.jianpu-connected-underline {
+  position: absolute;
+  height: 1.5px;
+  background-color: #2c2c2a;
+  pointer-events: none;
+}
+
+.jianpu-connected-underline.is-past {
+  background-color: #888780;
+}
+
+.jianpu-connected-underline.is-level-1 {
+  bottom: 4px;
+}
+
+.jianpu-connected-underline.is-level-2 {
+  bottom: 1px;
+}
+
+.jianpu-strip.is-tablet .jianpu-connected-underline {
+  height: 1.8px;
+}
+
+.jianpu-strip.is-tablet .jianpu-connected-underline.is-level-1 {
+  bottom: 4.5px;
+}
+
+.jianpu-strip.is-tablet .jianpu-connected-underline.is-level-2 {
+  bottom: 1.2px;
+}
+
 .jianpu-strip-item.is-past {
   color: #888780;
 }
@@ -2011,6 +2125,43 @@ button:disabled {
   font-size: 7px;
   line-height: 0.6;
   letter-spacing: 0.5px;
+}
+
+.jianpu-strip-aug-dot {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  margin-left: 1px;
+}
+
+.jianpu-strip.is-tablet .jianpu-strip-aug-dot {
+  font-size: 26px;
+}
+
+.jianpu-strip-underlines {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5px;
+  width: 100%;
+  min-width: 11px;
+  margin-top: 1px;
+}
+
+.jianpu-underline {
+  display: block;
+  width: 100%;
+  height: 1.5px;
+  background-color: currentColor;
+}
+
+.jianpu-strip.is-tablet .jianpu-strip-underlines {
+  gap: 2.5px;
+  min-width: 22px;
+  margin-top: 2px;
+}
+
+.jianpu-strip.is-tablet .jianpu-underline {
+  height: 2.2px;
 }
 
 .jianpu-strip.is-tablet .jianpu-strip-dots {
@@ -4434,6 +4585,13 @@ button:disabled {
   min-height: 28px;
 }
 
+.midi-range-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .midi-transpose-row,
 .midi-key-row {
   display: flex;
@@ -4964,4 +5122,329 @@ button:disabled {
   color: var(--text);
   font-size: 12px;
   text-decoration: underline;
+}
+
+
+/* === MIDI 分軌設定畫面 === */
+.midi-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.midi-track-mix-btn {
+  min-height: 40px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background-color: var(--card);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.midi-track-mix-btn:hover {
+  border-color: var(--blue);
+  color: var(--blue-text);
+}
+
+.track-mix-backdrop {
+  z-index: 60;
+}
+
+.track-mix-card {
+  width: min(760px, 94vw);
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.track-mix-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.track-mix-head h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.track-mix-subtitle {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.track-mix-done-btn {
+  min-height: 36px;
+  padding: 6px 16px;
+  border-radius: 8px;
+  background-color: var(--blue);
+  color: #0b1420;
+  font-size: 14px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.track-mix-done-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.track-mix-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  min-height: 0;
+  max-height: 60vh;
+}
+
+.track-mix-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background-color: var(--card);
+  flex-wrap: wrap;
+}
+
+.track-mix-row.is-vocal {
+  border-color: var(--blue);
+  background-color: var(--blue-bg);
+}
+
+.track-mix-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 180px;
+  flex: 1;
+}
+
+.track-mix-title-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.track-mix-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.track-mix-inst-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background-color: var(--panel);
+  color: var(--text-muted);
+}
+
+.track-mix-meta-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.track-mix-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.track-preview-btn {
+  min-height: 32px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background-color: var(--panel);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.track-preview-btn.is-playing {
+  border-color: var(--orange);
+  color: var(--orange);
+}
+
+.track-role-group .seg-btn {
+  min-height: 32px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.track-mix-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.track-mix-summary {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.track-mix-warn {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--orange);
+}
+
+/* === 練唱頁 MIDI 混音器與播放列按鈕 === */
+.tb-mixer-btn {
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background-color: var(--card);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.tb-mixer-btn.is-active {
+  border-color: var(--blue);
+  background-color: var(--blue-bg);
+  color: var(--blue-text);
+}
+
+.transport-bar.is-tablet .tb-mixer-btn {
+  height: 36px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+.transport-bar.is-portrait .transport-portrait-row2 .tb-mixer-btn {
+  height: 32px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.midi-mixer-popover {
+  position: absolute;
+  right: 12px;
+  bottom: 72px;
+  z-index: 30;
+  width: min(300px, calc(100% - 24px));
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background-color: rgba(24, 30, 41, 0.96);
+  color: var(--text);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.practice-page.is-portrait .midi-mixer-popover {
+  bottom: 106px;
+}
+
+.practice-page.is-phone .midi-mixer-popover {
+  bottom: 38px;
+}
+
+.midi-mixer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.midi-mixer-title {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.midi-mixer-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.midi-mixer-reset-btn {
+  font-size: 12px;
+  color: var(--blue-text);
+  padding: 2px 6px;
+}
+
+.midi-mixer-close-btn {
+  font-size: 14px;
+  color: var(--text-muted);
+  padding: 2px 6px;
+}
+
+.midi-mixer-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.midi-mixer-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.midi-mixer-row-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.midi-mixer-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.midi-mixer-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.midi-mixer-empty-hint {
+  margin-left: 4px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.midi-mixer-val {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.midi-mixer-slider:disabled {
+  opacity: 0.45;
+}
+
+.accomp-speaker-hint {
+  top: 44px;
 }

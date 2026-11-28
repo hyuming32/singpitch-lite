@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_MIDI_MIXER,
   fnv1aHash,
   loadMidiSongSettings,
   MemoryMidiStore,
+  resolveMidiMixer,
   saveMidiSongSettings,
   stripMidiExtension,
   type MidiSongSettings,
@@ -96,5 +98,70 @@ describe('MIDI 每首設定存取（localStorage）', () => {
 
     // 另一首歌互不干擾
     expect(loadMidiSongSettings('deadbeef', storage)).toBeNull();
+  });
+
+  it('儲存與讀取分軌角色與混音器設定，並相容無新欄位的舊資料', () => {
+    const storage = createMemoryStorage();
+    const oldHash = '11223344';
+    const newHash = '55667788';
+
+    // 模擬舊資料格式（無 trackRoles 與 mixer）
+    storage.setItem(
+      'singpitch-lite.midi.v1',
+      JSON.stringify({
+        [oldHash]: {
+          trackIndex: 3,
+          startBar: 7,
+          endBar: 32,
+          transposeSemitones: 0,
+          speedPercent: 100,
+          manualKey: null,
+        },
+      }),
+    );
+
+    const oldLoaded = loadMidiSongSettings(oldHash, storage);
+    expect(oldLoaded).not.toBeNull();
+    expect(oldLoaded!.trackIndex).toBe(3);
+    expect(oldLoaded!.trackRoles).toBeUndefined();
+    expect(resolveMidiMixer(oldLoaded)).toEqual(DEFAULT_MIDI_MIXER);
+
+    // 儲存含分軌與混音器的新設定（若意外傳入兩個 vocal，應自動正規化只留一個）
+    const cfgWithMix: MidiSongSettings = {
+      trackIndex: 2,
+      startBar: 1,
+      endBar: 16,
+      transposeSemitones: 2,
+      speedPercent: 90,
+      manualKey: null,
+      trackRoles: {
+        1: 'vocal',
+        2: 'vocal',
+        3: 'accompaniment',
+        11: 'rhythm',
+        9: 'mute',
+      },
+      mixer: {
+        vocalEnabled: true,
+        vocalVolume: 75,
+        accompEnabled: false,
+        accompVolume: 40,
+        rhythmEnabled: true,
+        rhythmVolume: 65,
+      },
+    };
+    saveMidiSongSettings(newHash, cfgWithMix, storage);
+
+    const loadedNew = loadMidiSongSettings(newHash, storage);
+    expect(loadedNew).not.toBeNull();
+    expect(loadedNew!.trackRoles).toEqual({
+      1: 'accompaniment',
+      2: 'vocal',
+      3: 'accompaniment',
+      11: 'rhythm',
+      9: 'mute',
+    });
+    expect(loadedNew!.mixer).toEqual(cfgWithMix.mixer);
+    expect(resolveMidiMixer(loadedNew)).toEqual(cfgWithMix.mixer);
   });
 });

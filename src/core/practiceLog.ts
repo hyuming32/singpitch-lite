@@ -29,7 +29,7 @@ export interface PracticeLogEntry {
   /** 實際播放累計秒數 */
   durationSec: number;
   source: PracticeLogSource;
-  mode: 'follow' | 'listen-then-sing';
+  mode: 'follow' | 'listen-then-sing' | 'shadow';
   bpm: number;
   rangeName: string;
   voice: 'normal' | 'male';
@@ -47,7 +47,7 @@ export interface PracticeLogEntry {
 
 export interface PracticeSessionContext {
   source: PracticeLogSource;
-  mode: 'follow' | 'listen-then-sing';
+  mode: 'follow' | 'listen-then-sing' | 'shadow';
   bpm: number;
   rangeName: string;
   voice: 'normal' | 'male';
@@ -66,7 +66,7 @@ export interface PracticeSessionState {
   startedAtMs: number;
   source: PracticeLogSource;
   sourceKey: string;
-  mode: 'follow' | 'listen-then-sing';
+  mode: 'follow' | 'listen-then-sing' | 'shadow';
   bpm: number;
   rangeName: string;
   voice: 'normal' | 'male';
@@ -557,6 +557,15 @@ export function formatKeyRangeSummary(
   return `${low} → ${high}，共 ${count} 調`;
 }
 
+/** 取得練唱模式的繁體中文顯示名稱 */
+export function formatPracticeModeLabel(
+  mode: 'follow' | 'listen-then-sing' | 'shadow',
+): string {
+  if (mode === 'follow') return '跟唱';
+  if (mode === 'shadow') return '影子練習';
+  return '先聽再唱';
+}
+
 /** 取得來源顯示名稱 */
 export function formatSourceTitle(source: PracticeLogSource): string {
   if (source.kind === 'scale') {
@@ -612,7 +621,7 @@ export function exportPracticeLogCsv(
       e.source.kind === 'midi'
         ? `第 ${e.source.startBar}–${e.source.endBar} 小節`
         : '';
-    const modeStr = e.mode === 'follow' ? '跟唱' : '先聽再唱';
+    const modeStr = formatPracticeModeLabel(e.mode);
     const voiceStr = e.voice === 'male' ? '男聲' : '一般';
     const minutesStr = Math.round(e.durationSec / 60);
     const keysStr = e.keys.join(' → ');

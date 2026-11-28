@@ -332,4 +332,30 @@ describe('日期分組、本週彙總與 CSV 匯出', () => {
     expect(lines[1]).toContain('C4 → D4');
     expect(lines[1]).toContain('MIDI 練唱');
   });
+
+  it('影子練習 mode shadow 的顯示文字與 CSV 匯出正確', () => {
+    const shadowEntry: PracticeLogEntry = {
+      id: 'shadow-1',
+      startedAtMs: new Date(2026, 10, 28, 15, 0, 0).getTime(),
+      durationSec: 120,
+      source: {
+        kind: 'scale',
+        patternId: 'major-arpeggio',
+        patternName: '大三和弦琶音',
+      },
+      mode: 'shadow',
+      bpm: 96,
+      rangeName: '女中音',
+      voice: 'normal',
+      keys: ['C4'],
+      lowestKey: 'C4',
+      highestKey: 'C4',
+      completedPasses: 2,
+      usedMic: true,
+    };
+
+    const csv = exportPracticeLogCsv([shadowEntry]);
+    const lines = csv.slice(1).split('\r\n');
+    expect(lines[1]).toContain('影子練習');
+  });
 });

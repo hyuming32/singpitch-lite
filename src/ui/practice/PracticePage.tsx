@@ -1,4 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  analyzeShadowNotes,
+  summarizeShadowPass,
+  type PitchFrame,
+  type ShadowNoteResult,
+} from '../../core/analysis';
 import { singingCurve } from '../../core/curve';
 import {
   buildExercise,
@@ -8,6 +14,11 @@ import {
 } from '../../core/exercise';
 import { keyName, type Key } from '../../core/key';
 import { buildMidiExercise } from '../../core/midiExercise';
+import {
+  buildMidiMixLayers,
+  resolveTrackRoles,
+  shouldShowAccompSpeakerHint,
+} from '../../core/midiMix';
 import { hzToMidi, midiToHz } from '../../core/notes';
 import { BUILTIN_PATTERNS } from '../../core/patterns';
 import {
@@ -28,7 +39,9 @@ import {
   type PracticeLogStore,
 } from '../../state/practiceLogStore';
 import {
+  resolveMidiMixer,
   stripMidiExtension,
+  type MidiMixerSettings,
   type MidiSongSettings,
 } from '../../state/midiLibrary';
 import { micCtxSecToSongSec } from '../../mic/latency';
@@ -74,13 +87,12 @@ import { JianpuStrip } from './JianpuStrip';
 import { KeyStrip } from './KeyStrip';
 import { ModeToggleButton } from './ModeToggleButton';
 import {
-  buildMidiScorePages,
   computeStaffMetrics,
   countInDotStates,
   currentNoteIndex,
-  midiPageIndexAtTime,
-  midiScoreLines,
+  listPassWindows,
   noteGlyphs,
+  notesForWindow,
   passWindow,
   rescaleTime,
   scoreLines,
@@ -88,8 +100,19 @@ import {
   staffLeftPad,
   timeToX,
   tonicLabel,
+  type NoteGlyph,
   type ScoreLine,
 } from './layout';
+import {
+  buildMidiLineGlyphs,
+  buildMidiMeasurePages,
+  computeIntroCountdownBars,
+  midiLineTimeToX,
+  midiMeasurePageIndexAtTime,
+  midiMeasureScoreLines,
+  type MidiLineRenderData,
+  type MidiMeasureScoreLine,
+} from './midiLayout';
 import {
   PORTRAIT_DEFAULT_PIANO_HEIGHT,
   clampPianoHeight,
@@ -135,6 +158,7 @@ import {
   downloadScreenshotBlob,
   exportPracticeScreenshot,
 } from './screenshot';
+import { MidiMixerPopover } from './MidiMixerPopover';
 import { TransportBar } from './TransportBar';
 
 interface PracticePageProps {
@@ -202,6 +226,16 @@ export function PracticePage({
   } | null>(null);
   const autoCalibTimerRef = useRef<number | null>(null);
   const [confusionBubbleOpen, setConfusionBubbleOpen] = useState(false);
+  const [mixerOpen, setMixerOpen] = useState(false);
+  const [midiMetronomeOverride, setMidiMetronomeOverride] = useState<
+    boolean | null
+  >(null);
+  const [accompSpeakerHintOpen, setAccompSpeakerHintOpen] = useState(false);
+  const accompSpeakerHintShownRef = useRef(false);
+  const [shadowMicHintOpen, setShadowMicHintOpen] = useState(false);
+  const [shadowPassBanner, setShadowPassBanner] = useState<string | null>(null);
+  const shadowBannerTimerRef = useRef<number | null>(null);
+  const lastEvaluatedShadowPassRef = useRef<string | null>(null);
   const [infLoopCount, setInfLoopCount] = useState(1);
   const [screenshotToast, setScreenshotToast] = useState<{
     message: string;
@@ -388,7 +422,8 @@ export function PracticePage({
         ...(midiSource.songSettings.manualKey
           ? { originalKey: midiSource.songSettings.manualKey }
           : {}),
-        mode: settings.mode,
+        mode:
+          settings.mode === 'listen-then-sing' ? 'listen-then-sing' : 'follow',
         repeats: repeatsPerKeyToCount(settings.repeatsPerKey),
         countIn: settings.countIn,
         displayTranspose: pitchShift,
@@ -408,9 +443,54 @@ export function PracticePage({
     pitchShift,
   ]);
 
+  const midiMixer = useMemo(
+    () => resolveMidiMixer(midiSource?.songSettings),
+    [midiSource?.songSettings],
+  );
+
+  const midiMixLayers = useMemo(() => {
+    if (!midiSource) return null;
+    const trackRoles = resolveTrackRoles(
+      midiSource.asset,
+      midiSource.songSettings,
+    );
+    return buildMidiMixLayers(midiSource.asset, {
+      trackRoles,
+      startBar: midiSource.songSettings.startBar,
+      endBar: midiSource.songSettings.endBar,
+      transposeSemitones: midiSource.songSettings.transposeSemitones,
+      speedPercent: midiSource.songSettings.speedPercent,
+      mode:
+        settings.mode === 'listen-then-sing' ? 'listen-then-sing' : 'follow',
+      repeats: repeatsPerKeyToCount(settings.repeatsPerKey),
+      countIn: settings.countIn,
+    });
+  }, [midiSource, settings.mode, settings.repeatsPerKey, settings.countIn]);
+
+  const rhythmActive =
+    isMidiMode &&
+    Boolean(midiMixLayers?.hasRhythmTracks) &&
+    midiMixer.rhythmEnabled;
+
+  const effectiveMetronome = isMidiMode
+    ? (midiMetronomeOverride ?? (rhythmActive ? false : settings.metronome))
+    : settings.metronome;
+
+  const hasAccompOrRhythmEnabled =
+    isMidiMode &&
+    Boolean(
+      (midiMixLayers?.hasAccompTracks &&
+        midiMixer.accompEnabled &&
+        midiMixer.accompVolume > 0) ||
+        (midiMixLayers?.hasRhythmTracks &&
+          midiMixer.rhythmEnabled &&
+          midiMixer.rhythmVolume > 0),
+    );
+
   const effectiveBpm = midiBuild?.res
     ? midiBuild.res.effectiveBpm
     : settings.bpm;
+  const isShadowMode = !isMidiMode && settings.mode === 'shadow';
 
   const logSource = useMemo<PracticeLogSource>(
     () =>
@@ -624,6 +704,7 @@ export function PracticePage({
       rawSungRef.current = rawSungRef.current.filter(
         (p) => p.t < anchorKb.start,
       );
+      lastEvaluatedShadowPassRef.current = null;
       voiceGateRef.current.reset();
       setSungVersion((v) => v + 1);
       setInfLoopCount((c) => c + 1);
@@ -783,18 +864,44 @@ export function PracticePage({
     return () => cancelAnimationFrame(rafId);
   }, [playing, exercise]);
 
+  const effectivePianoDuringSing = isShadowMode
+    ? false
+    : isMidiMode && settings.mode === 'follow'
+      ? true
+      : settings.pianoDuringSing;
+
+  const compileOptions = useMemo(
+    () => ({
+      pianoDuringSing: effectivePianoDuringSing,
+      pad: isMidiMode || isShadowMode ? false : settings.pad,
+      click: settings.countIn,
+      beatClicks: isMidiMode ? effectiveMetronome : true,
+      bpm: effectiveBpm,
+      voiceForGlide: true,
+      ...(isMidiMode && midiMixLayers
+        ? {
+            accompNotes: midiMixLayers.accompNotes,
+            rhythmHits: midiMixLayers.rhythmHits,
+          }
+        : {}),
+    }),
+    [
+      effectivePianoDuringSing,
+      isMidiMode,
+      isShadowMode,
+      settings.pad,
+      settings.countIn,
+      effectiveMetronome,
+      effectiveBpm,
+      midiMixLayers,
+    ],
+  );
+
   // 設定或練習變更時重新載入音訊時間表
   useEffect(() => {
     if (!exercise) return;
     engine.setA4(settings.a4);
-    engine.load(exercise, {
-      pianoDuringSing: settings.pianoDuringSing,
-      pad: isMidiMode ? false : settings.pad,
-      click: settings.countIn,
-      beatClicks: true,
-      bpm: effectiveBpm,
-      voiceForGlide: true,
-    });
+    engine.load(exercise, compileOptions);
     const pendingKey = pendingSeekKeyRef.current;
     if (pendingKey) {
       pendingSeekKeyRef.current = null;
@@ -838,23 +945,54 @@ export function PracticePage({
   }, [
     engine,
     exercise,
-    isMidiMode,
-    effectiveBpm,
+    compileOptions,
     settings.a4,
     settings.bpm,
     settings.pianoDuringSing,
-    settings.pad,
-    settings.countIn,
   ]);
 
-  // 節拍器與唱時鋼琴音量即時套用，不重新 load
+  // 節拍器與各匯流排音量即時套用，不重新 load
   useEffect(() => {
-    engine.setGain('metro', settings.metronome ? 1 : 0);
-  }, [engine, settings.metronome]);
+    engine.setGain('metro', effectiveMetronome ? 1 : 0);
+  }, [engine, effectiveMetronome]);
 
   useEffect(() => {
-    engine.setGain('melodySing', settings.singPianoVolume / 100);
-  }, [engine, settings.singPianoVolume]);
+    if (isMidiMode) {
+      const vocalGain = midiMixer.vocalEnabled
+        ? midiMixer.vocalVolume / 100
+        : 0;
+      const accompGain = midiMixer.accompEnabled
+        ? midiMixer.accompVolume / 100
+        : 0;
+      const rhythmGain = midiMixer.rhythmEnabled
+        ? midiMixer.rhythmVolume / 100
+        : 0;
+      engine.setGain('melody', vocalGain);
+      engine.setGain('melodySing', vocalGain);
+      engine.setGain('accomp', accompGain);
+      engine.setGain('rhythm', rhythmGain);
+    } else {
+      engine.setGain('melody', 1);
+      engine.setGain('melodySing', settings.singPianoVolume / 100);
+      engine.setGain('accomp', 0);
+      engine.setGain('rhythm', 0);
+    }
+  }, [engine, isMidiMode, midiMixer, settings.singPianoVolume]);
+
+  useEffect(() => {
+    if (
+      shouldShowAccompSpeakerHint({
+        isMidiMode,
+        hasAccompOrRhythmEnabled,
+        micActive,
+        micMode: settings.micMode,
+        alreadyShownThisVisit: accompSpeakerHintShownRef.current,
+      })
+    ) {
+      accompSpeakerHintShownRef.current = true;
+      setAccompSpeakerHintOpen(true);
+    }
+  }, [isMidiMode, hasAccompOrRhythmEnabled, micActive, settings.micMode]);
 
   useEffect(() => {
     micController.setGateDb(settings.noiseGateDb);
@@ -866,9 +1004,30 @@ export function PracticePage({
     voiceGateRef.current.reset();
     confusionRef.current.reset();
     setConfusionBubbleOpen(false);
+    lastEvaluatedShadowPassRef.current = null;
+    setShadowPassBanner(null);
+    if (shadowBannerTimerRef.current !== null) {
+      window.clearTimeout(shadowBannerTimerRef.current);
+      shadowBannerTimerRef.current = null;
+    }
     setSungMidi(null);
     setSungVersion((v) => v + 1);
   }, [exercise]);
+
+  useEffect(() => {
+    if (micActive || !isShadowMode) {
+      setShadowMicHintOpen(false);
+    }
+  }, [micActive, isShadowMode]);
+
+  useEffect(() => {
+    return () => {
+      if (shadowBannerTimerRef.current !== null) {
+        window.clearTimeout(shadowBannerTimerRef.current);
+        shadowBannerTimerRef.current = null;
+      }
+    };
+  }, []);
 
   // 離開頁面時關閉麥克風
   useEffect(() => {
@@ -1342,17 +1501,31 @@ export function PracticePage({
       await engine.init();
       await engine.unlock();
 
+      if (isShadowMode && !micActiveRef.current) {
+        setShadowMicHintOpen(true);
+      }
+
       engine.setA4(settings.a4);
-      engine.load(exercise, {
-        pianoDuringSing: settings.pianoDuringSing,
-        pad: isMidiMode ? false : settings.pad,
-        click: settings.countIn,
-        beatClicks: true,
-        bpm: effectiveBpm,
-        voiceForGlide: true,
-      });
-      engine.setGain('metro', settings.metronome ? 1 : 0);
-      engine.setGain('melodySing', settings.singPianoVolume / 100);
+      engine.load(exercise, compileOptions);
+      engine.setGain('metro', effectiveMetronome ? 1 : 0);
+      if (isMidiMode) {
+        const vocalGain = midiMixer.vocalEnabled
+          ? midiMixer.vocalVolume / 100
+          : 0;
+        engine.setGain('melody', vocalGain);
+        engine.setGain('melodySing', vocalGain);
+        engine.setGain(
+          'accomp',
+          midiMixer.accompEnabled ? midiMixer.accompVolume / 100 : 0,
+        );
+        engine.setGain(
+          'rhythm',
+          midiMixer.rhythmEnabled ? midiMixer.rhythmVolume / 100 : 0,
+        );
+      } else {
+        engine.setGain('melody', 1);
+        engine.setGain('melodySing', settings.singPianoVolume / 100);
+      }
       const currentSec = lastPosRef.current.sec;
       if (currentSec > 0) {
         engine.seek(currentSec);
@@ -1370,6 +1543,7 @@ export function PracticePage({
     loopAnchorKeyRef.current = clampedIdx;
     setInfLoopCount(1);
     rawSungRef.current = rawSungRef.current.filter((p) => p.t < targetSec);
+    lastEvaluatedShadowPassRef.current = null;
     voiceGateRef.current.reset();
     setSungVersion((v) => v + 1);
     lastPosRef.current = {
@@ -1392,6 +1566,7 @@ export function PracticePage({
     const clampedIdx = Math.max(0, Math.min(midiPages.length - 1, pageIdx));
     const targetSec = midiPages[clampedIdx]?.start ?? 0;
     rawSungRef.current = rawSungRef.current.filter((p) => p.t < targetSec);
+    lastEvaluatedShadowPassRef.current = null;
     voiceGateRef.current.reset();
     setSungVersion((v) => v + 1);
     lastPosRef.current = {
@@ -1613,17 +1788,34 @@ export function PracticePage({
   const maxLines = vpLayout.lineCount;
   const staffHeight = vpLayout.staffHeight;
 
-  const midiAvailWidth = Math.max(120, scoreWidth - 96);
-  const midiPages = useMemo(
-    () => (isMidiMode && exercise ? buildMidiScorePages(exercise, midiAvailWidth) : []),
-    [isMidiMode, exercise, midiAvailWidth],
+  const midiScoreBars = useMemo(
+    () => midiBuild?.res?.scoreBars ?? [],
+    [midiBuild],
   );
-  const midiPageIdx = isMidiMode ? midiPageIndexAtTime(midiPages, sec) : 0;
+  const midiHeaderReserve = Math.ceil(
+    staffLeftPad(activeKey, clef, vpLayout.sp) + 1.8 * vpLayout.sp + RIGHT_PAD,
+  );
+  const midiAvailWidth = Math.max(120, scoreWidth - midiHeaderReserve);
+  const midiPages = useMemo(
+    () =>
+      isMidiMode && exercise
+        ? buildMidiMeasurePages(exercise, midiScoreBars, midiAvailWidth, vpLayout.sp)
+        : [],
+    [isMidiMode, exercise, midiScoreBars, midiAvailWidth, vpLayout.sp],
+  );
+  const midiPageIdx = isMidiMode ? midiMeasurePageIndexAtTime(midiPages, sec) : 0;
 
   const lines = useMemo(() => {
     if (!exercise) return [];
     if (isMidiMode) {
-      return midiScoreLines(exercise, sec, maxLines, midiAvailWidth);
+      return midiMeasureScoreLines(
+        exercise,
+        midiScoreBars,
+        sec,
+        maxLines,
+        midiAvailWidth,
+        vpLayout.sp,
+      );
     }
     if (isPortrait) {
       const baseLines = scoreLinesPortrait(
@@ -1676,12 +1868,7 @@ export function PracticePage({
     ) {
       return baseLines;
     }
-    const currNotes = exercise.notes.filter(
-      (n) =>
-        n.keyIndex === curr.keyIndex &&
-        n.pass === curr.pass &&
-        n.phase === curr.phase,
-    );
+    const currNotes = notesForWindow(exercise, curr);
     const isLongPattern = currNotes.length > 12;
     const previewLine: ScoreLine = {
       keyIndex: curr.keyIndex,
@@ -1700,7 +1887,7 @@ export function PracticePage({
       return [curr, previewLine];
     }
     return currIdx === 0 ? [curr, previewLine] : [previewLine, curr];
-  }, [exercise, isMidiMode, midiAvailWidth, sec, maxLines, settings.repeatsPerKey, isPortrait]);
+  }, [exercise, isMidiMode, midiScoreBars, midiAvailWidth, vpLayout.sp, sec, maxLines, settings.repeatsPerKey, isPortrait]);
 
   const sungByLine = useMemo(() => {
     const raw = rawSungRef.current;
@@ -1776,65 +1963,218 @@ export function PracticePage({
     ? countInDotStates(exercise, sec)
     : { active: false, dots: [] };
 
+  const shadowClickTimes = useMemo<number[]>(() => {
+    if (!isShadowMode || !settings.metronome || !exercise || effectiveBpm <= 0) {
+      return [];
+    }
+    const firstBeat = exercise.clicks[0]?.t ?? 0;
+    const beatSec = 60 / effectiveBpm;
+    const times: number[] = [];
+    for (let i = 0; ; i++) {
+      const t = firstBeat + i * beatSec;
+      if (t >= exercise.total - 1e-6) break;
+      times.push(t);
+    }
+    return times;
+  }, [isShadowMode, settings.metronome, exercise, effectiveBpm]);
+
+  const shadowFrames = useMemo<PitchFrame[]>(() => {
+    if (!isShadowMode) return [];
+    return rawSungRef.current.map((s) => ({
+      t: s.t,
+      hz: s.voiced ? s.rawHz : 0,
+      db: s.voiced ? 0 : -100,
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isShadowMode, sungVersion]);
+
+  useEffect(() => {
+    if (
+      !isShadowMode ||
+      !exercise ||
+      (!micActive && shadowFrames.length === 0)
+    ) {
+      return;
+    }
+    const windows = listPassWindows(exercise);
+    for (const w of windows) {
+      if (!w.isShadow) continue;
+      const gapNotes = notesForWindow(exercise, w).filter((n) => n.silent);
+      if (gapNotes.length === 0) continue;
+      const lastGap = gapNotes[gapNotes.length - 1]!;
+      const lastGapEnd = lastGap.start + lastGap.dur;
+      if (sec < lastGapEnd - 0.02 || sec > w.end + 0.4) continue;
+      const passKey = `${w.keyIndex}:${w.pass}`;
+      if (lastEvaluatedShadowPassRef.current === passKey) continue;
+      lastEvaluatedShadowPassRef.current = passKey;
+
+      const results = analyzeShadowNotes(gapNotes, shadowFrames, {
+        a4: settings.a4,
+        displayTranspose: pitchShift,
+        clickTimes: shadowClickTimes,
+      });
+      const summary = summarizeShadowPass(results);
+      setShadowPassBanner(summary.text);
+      if (shadowBannerTimerRef.current !== null) {
+        window.clearTimeout(shadowBannerTimerRef.current);
+      }
+      shadowBannerTimerRef.current = window.setTimeout(() => {
+        shadowBannerTimerRef.current = null;
+        setShadowPassBanner(null);
+      }, 3000);
+      break;
+    }
+  }, [
+    isShadowMode,
+    exercise,
+    micActive,
+    shadowFrames,
+    sec,
+    settings.a4,
+    pitchShift,
+    shadowClickTimes,
+  ]);
+
+  const passWindows = useMemo(
+    () => (exercise ? listPassWindows(exercise) : []),
+    [exercise],
+  );
+
   let targetMidi: number | null = null;
   const renderedLines = lines.map((line) => {
     const lineKeyBlock = exercise?.keys[line.keyIndex];
     const lineKey = lineKeyBlock?.key ?? activeKey;
     const lineTonicMidi = lineKeyBlock?.tonicMidi ?? tonicMidi;
-    const allWinNotes = exercise
-      ? exercise.notes.filter(
-          (n) =>
-            n.keyIndex === line.keyIndex &&
-            n.pass === line.pass &&
-            n.phase === line.phase,
-        )
-      : [];
-    const lineNotes = allWinNotes.slice(line.noteRange[0], line.noteRange[1]);
-    const positions = lineNotes.map((n) => ({
-      position: staffPosition(n.midi, lineKey, clef).position,
-      ...(n.endMidi !== undefined
-        ? { endPosition: staffPosition(n.endMidi, lineKey, clef).position }
-        : {}),
-    }));
-    const metrics = computeStaffMetrics(positions, staffHeight, isTablet);
-    const leftPad = staffLeftPad(lineKey, clef, metrics.lineSpacing);
-    const glyphs = exercise
-      ? noteGlyphs(
-          exercise,
-          line,
-          lineKey,
-          clef,
-          scoreWidth,
-          leftPad,
-          RIGHT_PAD,
-          metrics.lineSpacing,
-          line.noteRange,
-        )
-      : [];
+
+    let metrics;
+    let leftPad: number;
+    let glyphs: NoteGlyph[];
+    let midiData: MidiLineRenderData | undefined;
+    let introCountdownBars: number | null = null;
+    let playheadX: number | null = null;
+
+    if (isMidiMode && 'page' in line) {
+      const midiLine = line as MidiMeasureScoreLine;
+      const positions: { position: number }[] = [];
+      for (const bar of midiLine.page.bars) {
+        for (const ev of bar.events) {
+          if (ev.kind === 'note' && ev.midi !== undefined) {
+            positions.push({
+              position: staffPosition(ev.midi, lineKey, clef).position,
+            });
+          }
+        }
+      }
+      metrics = computeStaffMetrics(positions, staffHeight, isTablet);
+      const passWin = passWindows.find(
+        (w) =>
+          w.keyIndex === midiLine.keyIndex &&
+          w.pass === midiLine.pass &&
+          w.phase === midiLine.phase,
+      );
+      const passStartSec = passWin?.start ?? midiLine.start;
+      const built = buildMidiLineGlyphs({
+        page: midiLine.page,
+        key: lineKey,
+        clef,
+        scoreWidth,
+        rightPad: RIGHT_PAD,
+        lineSpacing: metrics.lineSpacing,
+        isFirstLineInPass: midiLine.page.barRange[0] === 0,
+        isLastPageInPass: midiLine.page.barRange[1] >= midiScoreBars.length,
+        passStartSec,
+      });
+      glyphs = built.glyphs;
+      midiData = built.renderData;
+      leftPad = midiData.leftPad;
+
+      const showPlayhead =
+        line.isCurrent &&
+        sec >= line.start - 0.001 &&
+        sec <= line.end + 0.001;
+      playheadX = showPlayhead
+        ? midiLineTimeToX(
+            Math.max(line.start, Math.min(line.end, sec)),
+            midiData.segments,
+            midiData.leftPad,
+            midiData.rightEdge,
+          )
+        : null;
+      if (line.isCurrent) {
+        introCountdownBars = computeIntroCountdownBars(
+          midiScoreBars,
+          passStartSec,
+          sec,
+        );
+      }
+    } else {
+      const allWinNotes = exercise ? notesForWindow(exercise, line) : [];
+      const lineNotes = allWinNotes.slice(line.noteRange[0], line.noteRange[1]);
+      const positions = lineNotes.map((n) => ({
+        position: staffPosition(n.midi, lineKey, clef).position,
+        ...(n.endMidi !== undefined
+          ? { endPosition: staffPosition(n.endMidi, lineKey, clef).position }
+          : {}),
+      }));
+      metrics = computeStaffMetrics(positions, staffHeight, isTablet);
+      leftPad = staffLeftPad(lineKey, clef, metrics.lineSpacing);
+      glyphs = exercise
+        ? noteGlyphs(
+            exercise,
+            line,
+            lineKey,
+            clef,
+            scoreWidth,
+            leftPad,
+            RIGHT_PAD,
+            metrics.lineSpacing,
+            line.noteRange,
+          )
+        : [];
+      const showPlayhead =
+        line.isCurrent &&
+        sec >= line.start - 0.001 &&
+        sec <= line.end + 0.001;
+      playheadX = showPlayhead
+        ? timeToX(
+            Math.max(line.start, Math.min(line.end, sec)),
+            line.start,
+            line.end,
+            leftPad,
+            Math.max(leftPad + 1, scoreWidth - RIGHT_PAD),
+          )
+        : null;
+    }
 
     const activeNoteIdx = line.isCurrent ? currentNoteIndex(glyphs, sec) : -1;
-    if (line.isCurrent && activeNoteIdx >= 0) {
-      const activeGlyph = glyphs[activeNoteIdx]!;
+    const activeGlyph = activeNoteIdx >= 0 ? glyphs[activeNoteIdx] : undefined;
+    if (line.isCurrent && activeGlyph && !activeGlyph.isRest) {
       targetMidi = activeGlyph.midi;
     }
 
-    const showPlayhead =
-      line.isCurrent &&
-      sec >= line.start - 0.001 &&
-      sec <= line.end + 0.001;
-    const playheadX = showPlayhead
-      ? timeToX(
-          Math.max(line.start, Math.min(line.end, sec)),
-          line.start,
-          line.end,
-          leftPad,
-          Math.max(leftPad + 1, scoreWidth - RIGHT_PAD),
-        )
-      : null;
     const activeNoteX =
-      line.isCurrent && activeNoteIdx >= 0 ? glyphs[activeNoteIdx]!.x : null;
+      line.isCurrent && activeGlyph && !activeGlyph.isRest
+        ? activeGlyph.x
+        : null;
 
     const isPreviewLine = line.isPreview ?? !line.isCurrent;
+    const shadowResults: (ShadowNoteResult | null)[] | undefined =
+      isShadowMode &&
+      !isPreviewLine &&
+      (micActive || shadowFrames.length > 0)
+        ? glyphs.map((g) => {
+            if (!g.silent || sec < g.start + g.dur - 0.005) {
+              return null;
+            }
+            return (
+              analyzeShadowNotes([g], shadowFrames, {
+                a4: settings.a4,
+                displayTranspose: pitchShift,
+                clickTimes: shadowClickTimes,
+              })[0] ?? null
+            );
+          })
+        : undefined;
     const keyText = tonicLabel(lineKey);
     let lineLabel: string | null = null;
     if (isMidiMode) {
@@ -1889,7 +2229,10 @@ export function PracticePage({
       activeNoteIdx,
       playheadX,
       activeNoteX,
+      shadowResults,
       lineLabel,
+      midiData,
+      introCountdownBars,
     };
   });
 
@@ -2072,6 +2415,9 @@ export function PracticePage({
               ? octaveTag
               : null,
           svgElement: svgNodes[idx] ?? null,
+          extraJianpuMarkers: item.midiData?.jianpuMarkers,
+          underlineSegments: item.midiData?.jianpuUnderlineSegments,
+          minNoteSpacingPx: item.midiData?.minNoteSpacingPx,
         })),
       });
       if (result.status === 'needs-tap') {
@@ -2192,6 +2538,7 @@ export function PracticePage({
           <ModeToggleButton
             mode={settings.mode}
             isCompact={isPortrait}
+            allowShadow={!isMidiMode}
             onToggle={handleToggleMode}
           />
           {!isPortrait && (
@@ -2336,6 +2683,26 @@ export function PracticePage({
             </div>
           )}
 
+          {accompSpeakerHintOpen && (
+            <div
+              className="confusion-bubble accomp-speaker-hint"
+              role="status"
+            >
+              <span className="confusion-bubble-text">
+                伴奏會被麥克風收到，建議戴耳機，判斷才準
+              </span>
+              <div className="confusion-bubble-actions">
+                <button
+                  type="button"
+                  className="confusion-btn confusion-btn-primary"
+                  onClick={() => setAccompSpeakerHintOpen(false)}
+                >
+                  知道了
+                </button>
+              </div>
+            </div>
+          )}
+
           {autoCalibBanner && (
             <div
               className={`auto-calib-toast is-${autoCalibBanner.tone}`}
@@ -2343,6 +2710,39 @@ export function PracticePage({
               aria-live="polite"
             >
               {autoCalibBanner.text}
+            </div>
+          )}
+
+          {shadowMicHintOpen && isShadowMode && !micActive && (
+            <div className="shadow-mic-hint-banner" role="status">
+              <span>影子練習需要麥克風才能判斷</span>
+              <div className="shadow-mic-hint-actions">
+                <button
+                  type="button"
+                  className="shadow-mic-hint-btn"
+                  onClick={() => void handleToggleMic()}
+                >
+                  開啟麥克風
+                </button>
+                <button
+                  type="button"
+                  className="shadow-mic-hint-close"
+                  aria-label="關閉提示"
+                  onClick={() => setShadowMicHintOpen(false)}
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          )}
+
+          {shadowPassBanner && isShadowMode && (
+            <div
+              className="shadow-pass-summary-banner"
+              role="status"
+              aria-live="polite"
+            >
+              {shadowPassBanner}
             </div>
           )}
 
@@ -2368,10 +2768,10 @@ export function PracticePage({
                   />
                 )}
 
-                {/* 播放位置藍色虛線（僅出現在正在唱的那一行） */}
+                {/* 播放位置藍色虛線／MIDI 直線游標（僅出現在正在唱的那一行） */}
                 {item.playheadX !== null && (
                   <div
-                    className="score-playhead"
+                    className={`score-playhead ${isMidiMode ? 'is-midi' : ''}`}
                     style={{ left: `${item.playheadX}px` }}
                     aria-hidden="true"
                   />
@@ -2394,6 +2794,9 @@ export function PracticePage({
                       : null
                   }
                   height={vpLayout.jianpuHeight}
+                  extraMarkers={item.midiData?.jianpuMarkers}
+                  underlineSegments={item.midiData?.jianpuUnderlineSegments}
+                  minNoteSpacingPx={item.midiData?.minNoteSpacingPx}
                 />
 
                 <StaffView
@@ -2416,7 +2819,12 @@ export function PracticePage({
                       ? countIn
                       : { active: false, dots: [] }
                   }
+                  shadowResults={item.shadowResults}
                   isTablet={isTablet}
+                  midiData={item.midiData}
+                  sec={item.line.isCurrent ? sec : undefined}
+                  introCountdownBars={item.introCountdownBars}
+                  isCurrentLine={item.line.isCurrent}
                 />
               </div>
             ))}
@@ -2456,7 +2864,24 @@ export function PracticePage({
         />
       </div>
 
-      {/* 4. 播放列 */}
+      {/* 4. 播放列 + MIDI 混音器 */}
+      {isMidiMode && (
+        <MidiMixerPopover
+          open={mixerOpen}
+          mixer={midiMixer}
+          hasAccompTracks={Boolean(midiMixLayers?.hasAccompTracks)}
+          hasRhythmTracks={Boolean(midiMixLayers?.hasRhythmTracks)}
+          onChange={(nextMixer: MidiMixerSettings) => {
+            if (midiSource && onUpdateMidiSongSettings) {
+              onUpdateMidiSongSettings(midiSource.hash, {
+                ...midiSource.songSettings,
+                mixer: nextMixer,
+              });
+            }
+          }}
+          onClose={() => setMixerOpen(false)}
+        />
+      )}
       <TransportBar
         playing={playing}
         canPrevKey={isMidiMode ? midiPageIdx > 0 : currentKeyIndex > 0}
@@ -2470,7 +2895,7 @@ export function PracticePage({
         repeatsPerKey={settings.repeatsPerKey}
         currentPass={currentPassNum}
         bpm={effectiveBpm}
-        metronome={settings.metronome}
+        metronome={effectiveMetronome}
         firstBeat={exercise?.clicks[0]?.t ?? 0}
         transposeOffset={
           isMidiMode && midiSource
@@ -2495,14 +2920,27 @@ export function PracticePage({
         height={vpLayout.transportHeight}
         getSec={getExtrapolatedSec}
         canScreenshot={canTakeScreenshot}
+        showMixerButton={isMidiMode}
+        mixerOpen={mixerOpen}
+        onToggleMixer={() => setMixerOpen((v) => !v)}
         onPrevKey={handlePrevKey}
         onPlayPause={handlePlayPause}
         onScreenshot={handleScreenshot}
         onNextKey={handleNextKey}
         onCycleRepeats={handleCycleRepeats}
-        onToggleMetronome={() =>
-          onUpdateSettings({ metronome: !settings.metronome })
-        }
+        onToggleMetronome={() => {
+          if (isMidiMode) {
+            if (playing || sec > 0) {
+              pendingSeekRef.current = {
+                sec: getExtrapolatedSec(),
+                resumePlay: playing,
+              };
+            }
+            setMidiMetronomeOverride(!effectiveMetronome);
+          } else {
+            onUpdateSettings({ metronome: !settings.metronome });
+          }
+        }}
         onBpmStep={handleBpmStep}
         onBpmChange={handleBpmChange}
         onBpmReset={handleBpmReset}

@@ -7,6 +7,7 @@ import type {
 import type { Key } from './key';
 import { detectKey, keyConfidence, type KeyConfidence } from './keyDetect';
 import type { MidiAsset, MidiNote, MidiTrack } from './midi';
+import { buildQuantizedMidiBars, type MidiScoreBar } from './midiScore';
 
 export interface MidiBarInfo {
   /** 小節編號（1 起算） */
@@ -19,6 +20,14 @@ export interface MidiBarInfo {
   bpm: number;
   /** 此小節拍數 */
   beatsInBar: number;
+  /** 拍號分子（例：4/4 為 4、2/4 為 2） */
+  numerator?: number;
+  /** 拍號分母（例：4/4 為 4、6/8 為 8） */
+  denominator?: number;
+  /** 此小節各拍的開始時間（秒） */
+  beatTimes?: number[];
+  /** 是否在第一小節或相較前一曉節改變拍號 */
+  timeSigChanged?: boolean;
 }
 
 export interface MidiExerciseOptions {
@@ -56,6 +65,8 @@ export interface MidiExerciseResult {
   transposedKey: Key;
   /** 區間內擷取的單音旋律（未移調、未時間縮放） */
   melodyNotes: MidiNote[];
+  /** 量化後的逐小節樂譜資料（時間相對於單遍起點，已套用移調、displayTranspose 與變速） */
+  scoreBars: MidiScoreBar[];
 }
 
 const EPS = 1e-6;
@@ -84,6 +95,8 @@ export function extractMelodyNotes(notes: readonly MidiNote[]): MidiNote[] {
     end: number;
     note: MidiNote;
     sourceIdx: number;
+    startTick?: number;
+    endTick?: number;
   }
 
   const slices: Slice[] = [];
@@ -114,18 +127,53 @@ export function extractMelodyNotes(notes: readonly MidiNote[]): MidiNote[] {
 
     if (best) {
       const prev = slices[slices.length - 1];
+      // 只合併同一個原始音符（sourceIdx 相同）被短暫複音打斷的切片；不同 note-on 絕不合併
       if (
         prev &&
         prev.sourceIdx === best.idx &&
         Math.abs(prev.end - segStart) <= 1e-5
       ) {
         prev.end = segEnd;
+        if (
+          prev.endTick !== undefined &&
+          best.note.endTick !== undefined &&
+          best.note.startTick !== undefined
+        ) {
+          const origSpan = best.note.end - best.note.start;
+          const fracEnd =
+            origSpan > EPS
+              ? (segEnd - best.note.start) / origSpan
+              : 1;
+          prev.endTick =
+            best.note.startTick +
+            (best.note.endTick - best.note.startTick) * Math.min(1, Math.max(0, fracEnd));
+        }
       } else {
+        let startTick: number | undefined;
+        let endTick: number | undefined;
+        if (
+          best.note.startTick !== undefined &&
+          best.note.endTick !== undefined
+        ) {
+          const origSpan = best.note.end - best.note.start;
+          const tickSpan = best.note.endTick - best.note.startTick;
+          if (origSpan > EPS) {
+            const f0 = Math.min(1, Math.max(0, (segStart - best.note.start) / origSpan));
+            const f1 = Math.min(1, Math.max(0, (segEnd - best.note.start) / origSpan));
+            startTick = best.note.startTick + tickSpan * f0;
+            endTick = best.note.startTick + tickSpan * f1;
+          } else {
+            startTick = best.note.startTick;
+            endTick = best.note.endTick;
+          }
+        }
         slices.push({
           start: segStart,
           end: segEnd,
           note: best.note,
           sourceIdx: best.idx,
+          ...(startTick !== undefined ? { startTick } : {}),
+          ...(endTick !== undefined ? { endTick } : {}),
         });
       }
     }
@@ -139,25 +187,50 @@ export function extractMelodyNotes(notes: readonly MidiNote[]): MidiNote[] {
       midi: s.note.midi,
       velocity: s.note.velocity,
       track: s.note.track,
+      ...(s.startTick !== undefined ? { startTick: s.startTick } : {}),
+      ...(s.endTick !== undefined ? { endTick: s.endTick } : {}),
     }));
 }
 
-/** 依 MidiAsset.beats 的 beatInBar 計算每小節起訖時間與速度 */
+/** 依 MidiAsset.beats 與拍號事件計算每小節起訖時間、拍數、拍點與速度 */
 export function computeMidiBars(asset: MidiAsset): MidiBarInfo[] {
-  const { beats, duration } = asset;
+  const { beats, duration, timeSignatures } = asset;
+
+  const findTimeSigAt = (time: number): { numerator: number; denominator: number } | null => {
+    if (!timeSignatures || timeSignatures.length === 0) return null;
+    let active = timeSignatures[0]!;
+    for (const ts of timeSignatures) {
+      if (ts.time <= time + 1e-3) {
+        active = ts;
+      } else {
+        break;
+      }
+    }
+    return { numerator: active.numerator, denominator: active.denominator };
+  };
 
   if (beats.length === 0) {
-    const defaultBeatSec = 0.5; // 120 BPM
-    const barDur = defaultBeatSec * 4;
+    const ts = findTimeSigAt(0) ?? { numerator: 4, denominator: 4 };
+    const defaultBeatSec = (60 / 120) * (4 / ts.denominator);
+    const barDur = defaultBeatSec * ts.numerator;
     const totalBars = Math.max(1, Math.ceil(Math.max(duration, barDur) / barDur));
     const bars: MidiBarInfo[] = [];
     for (let i = 0; i < totalBars; i++) {
+      const start = i * barDur;
+      const beatTimes: number[] = [];
+      for (let bi = 0; bi < ts.numerator; bi++) {
+        beatTimes.push(start + bi * defaultBeatSec);
+      }
       bars.push({
         barNumber: i + 1,
-        start: i * barDur,
+        start,
         end: (i + 1) * barDur,
-        bpm: 120,
-        beatsInBar: 4,
+        bpm: 120 * (ts.denominator / 4),
+        beatsInBar: ts.numerator,
+        numerator: ts.numerator,
+        denominator: ts.denominator,
+        beatTimes,
+        timeSigChanged: i === 0,
       });
     }
     return bars;
@@ -172,6 +245,9 @@ export function computeMidiBars(asset: MidiAsset): MidiBarInfo[] {
   }
 
   const bars: MidiBarInfo[] = [];
+  let prevNum = -1;
+  let prevDen = -1;
+
   for (let b = 0; b < barStartIndices.length; b++) {
     const idx = barStartIndices[b]!;
     const nextIdx =
@@ -190,16 +266,67 @@ export function computeMidiBars(asset: MidiAsset): MidiBarInfo[] {
     }
 
     const beatsInBar = Math.max(1, nextIdx - idx);
+    const beatTimes = beats.slice(idx, nextIdx).map((bt) => bt[0]);
+    const ts = findTimeSigAt(startTime);
+    const numerator = ts ? ts.numerator : beatsInBar;
+    const denominator = ts ? ts.denominator : 4;
+    const timeSigChanged =
+      b === 0 || numerator !== prevNum || denominator !== prevDen;
+    prevNum = numerator;
+    prevDen = denominator;
+
     bars.push({
       barNumber: b + 1,
       start: startTime,
       end: Math.max(startTime + 0.05, endTime),
       bpm: safeBpm,
       beatsInBar,
+      numerator,
+      denominator,
+      beatTimes,
+      timeSigChanged,
     });
   }
 
   return bars;
+}
+
+/** 計算指定音軌的預設練習小節區間（從第一個有音的小節到最後一個有音的小節，略過前奏與尾奏空白） */
+export function defaultBarRangeForTrack(
+  track: MidiTrack,
+  bars: readonly MidiBarInfo[],
+): { startBar: number; endBar: number; skippedIntroBars: number } {
+  const maxBar = Math.max(1, bars.length);
+  const validNotes = track.notes.filter((n) => n.end > n.start + EPS);
+  if (validNotes.length === 0 || bars.length === 0) {
+    return { startBar: 1, endBar: maxBar, skippedIntroBars: 0 };
+  }
+
+  let firstStart = Infinity;
+  let lastEnd = -Infinity;
+  for (const n of validNotes) {
+    if (n.start < firstStart) firstStart = n.start;
+    if (n.end > lastEnd) lastEnd = n.end;
+  }
+
+  const firstBar =
+    bars.find((b) => firstStart < b.end - 1e-4) ?? bars[0]!;
+  let lastBar = bars[bars.length - 1]!;
+  for (let i = bars.length - 1; i >= 0; i--) {
+    const b = bars[i]!;
+    if (lastEnd > b.start + 1e-4) {
+      lastBar = b;
+      break;
+    }
+  }
+
+  const startBar = Math.max(1, Math.min(maxBar, firstBar.barNumber));
+  const endBar = Math.max(startBar, Math.min(maxBar, lastBar.barNumber));
+  return {
+    startBar,
+    endBar,
+    skippedIntroBars: Math.max(0, startBar - 1),
+  };
 }
 
 /** 切出 A–B 小節區間內的單音旋律音符，並將時間歸零（未縮放速度） */
@@ -248,6 +375,8 @@ export function sliceMelodyByBars(
           midi: n.midi,
           velocity: n.velocity,
           track: n.track,
+          ...(n.startTick !== undefined ? { startTick: n.startTick } : {}),
+          ...(n.endTick !== undefined ? { endTick: n.endTick } : {}),
         });
       }
     }
@@ -426,6 +555,7 @@ export function buildMidiExercise(
         keyIndex: 0,
         pass,
         phase,
+        ...(mode === 'follow' ? { alwaysPlay: true } : {}),
       });
     }
     tCursor += passDur;
@@ -450,6 +580,14 @@ export function buildMidiExercise(
     },
   ];
 
+  const scoreBars = buildQuantizedMidiBars(asset, track, bars, {
+    startBar: opts.startBar,
+    endBar: opts.endBar,
+    transposeSemitones,
+    displayTranspose,
+    speedPercent,
+  });
+
   return {
     exercise: {
       keys,
@@ -463,5 +601,6 @@ export function buildMidiExercise(
     originalKey,
     transposedKey,
     melodyNotes: sliced.notes,
+    scoreBars,
   };
 }

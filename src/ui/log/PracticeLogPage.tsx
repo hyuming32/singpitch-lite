@@ -4,6 +4,7 @@ import {
   exportPracticeLogCsv,
   formatDayHeader,
   formatKeyRangeSummary,
+  formatPracticeModeLabel,
   formatSourceTitle,
   formatTimeOfDay,
   groupEntriesByDate,
@@ -261,11 +262,7 @@ export function PracticeLogPage({
                               </div>
                               <div>
                                 <dt>練唱模式</dt>
-                                <dd>
-                                  {entry.mode === 'follow'
-                                    ? '跟唱'
-                                    : '先聽再唱'}
-                                </dd>
+                                <dd>{formatPracticeModeLabel(entry.mode)}</dd>
                               </div>
                               <div>
                                 <dt>速度 / 音域 / 聲部</dt>

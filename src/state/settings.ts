@@ -10,7 +10,8 @@ export const SETTINGS_STORAGE_KEY = 'singpitch-lite.settings.v1';
 export type NoteBeatsOption = 0.5 | 1 | 2;
 export type ArticulationOption = 'legato' | 'staccato';
 export type TransposeOption = 'fixed' | 'up' | 'up-down';
-export type PracticeModeOption = 'follow' | 'listen-then-sing';
+export type PracticeModeOption = 'follow' | 'listen-then-sing' | 'shadow';
+export type ShadowGapMultiplier = 1 | 2;
 export type MicInputMode = 'speaker' | 'headphone';
 export type RepeatsPerKeyOption = 1 | 2 | 3 | 5 | 'inf';
 export type VoiceOption = 'normal' | 'male';
@@ -80,6 +81,7 @@ export interface PracticeSettings {
   articulation: ArticulationOption;
   transpose: TransposeOption;
   mode: PracticeModeOption;
+  shadowGapMultiplier: ShadowGapMultiplier;
   pianoDuringSing: boolean;
   pad: boolean;
   cadence: CadenceMode;
@@ -113,6 +115,7 @@ export const DEFAULT_SETTINGS: PracticeSettings = {
   articulation: 'legato',
   transpose: 'up-down',
   mode: 'follow',
+  shadowGapMultiplier: 1,
   pianoDuringSing: true,
   pad: true,
   cadence: 'leading',
@@ -335,9 +338,14 @@ export function sanitizeSettings(raw: unknown): PracticeSettings {
       : DEFAULT_SETTINGS.transpose;
 
   const mode: PracticeModeOption =
-    obj.mode === 'follow' || obj.mode === 'listen-then-sing'
+    obj.mode === 'follow' ||
+    obj.mode === 'listen-then-sing' ||
+    obj.mode === 'shadow'
       ? obj.mode
       : DEFAULT_SETTINGS.mode;
+
+  const shadowGapMultiplier: ShadowGapMultiplier =
+    obj.shadowGapMultiplier === 2 ? 2 : DEFAULT_SETTINGS.shadowGapMultiplier;
 
   const jianpuMode: JianpuMode =
     obj.jianpuMode === 'fixed' || obj.jianpuMode === 'movable'
@@ -391,6 +399,7 @@ export function sanitizeSettings(raw: unknown): PracticeSettings {
     articulation,
     transpose,
     mode,
+    shadowGapMultiplier,
     pianoDuringSing: validateBoolean(obj.pianoDuringSing, DEFAULT_SETTINGS.pianoDuringSing),
     pad: validateBoolean(obj.pad, DEFAULT_SETTINGS.pad),
     cadence: sanitizeCadence(obj.cadence),
@@ -637,6 +646,7 @@ export function toExerciseOptions(settings: PracticeSettings): ExerciseOptions {
     cadence: settings.cadence,
     countInBeats: settings.countIn ? 4 : 0,
     mode: settings.mode,
+    shadowGapMultiplier: settings.shadowGapMultiplier,
   };
 }
 

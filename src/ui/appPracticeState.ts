@@ -1,5 +1,5 @@
-import { melodyCandidates, parseMidi } from '../core/midi';
-import { computeMidiBars } from '../core/midiExercise';
+import { parseMidi, suggestMelodyTrack } from '../core/midi';
+import { computeMidiBars, defaultBarRangeForTrack } from '../core/midiExercise';
 import {
   loadMidiSongSettings,
   type MidiLibraryEntry,
@@ -55,18 +55,25 @@ export function buildMidiSourceFromEntry(
   const bars = computeMidiBars(asset);
   const maxBar = Math.max(1, bars.length);
   const saved = loadMidiSongSettings(entry.hash);
+  const defaultTrackIndex =
+    suggestMelodyTrack(asset) ?? asset.tracks[0]?.index ?? 0;
+  const defaultTrack =
+    asset.tracks.find((t) => t.index === defaultTrackIndex) ?? asset.tracks[0];
+  const defaultRange = defaultTrack
+    ? defaultBarRangeForTrack(defaultTrack, bars)
+    : { startBar: 1, endBar: maxBar, skippedIntroBars: 0 };
   const startBar = Math.max(
     1,
-    Math.min(maxBar, sess.startBar ?? saved?.startBar ?? 1),
+    Math.min(maxBar, sess.startBar ?? saved?.startBar ?? defaultRange.startBar),
   );
   const endBar = Math.max(
     startBar,
-    Math.min(maxBar, sess.endBar ?? saved?.endBar ?? maxBar),
+    Math.min(maxBar, sess.endBar ?? saved?.endBar ?? defaultRange.endBar),
   );
   const songSettings: MidiSongSettings = saved
     ? { ...saved, startBar, endBar }
     : {
-        trackIndex: melodyCandidates(asset)[0] ?? asset.tracks[0]?.index ?? 0,
+        trackIndex: defaultTrackIndex,
         startBar,
         endBar,
         transposeSemitones: 0,

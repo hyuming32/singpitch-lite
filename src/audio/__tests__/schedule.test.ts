@@ -278,4 +278,38 @@ describe('compileExercise', () => {
       expect(cadenceOn[i]!.hz).toBeCloseTo(expectedHz, 6);
     }
   });
+
+  it('影子模式空拍事件不送出任何鋼琴音（即使 pianoDuringSing 為 true）', () => {
+    const ex = buildExercise(
+      { jianpu: '1 2 3~5', chords: 'I' },
+      {
+        startTonic: 60,
+        low: 48,
+        high: 79,
+        bpm: 60,
+        mode: 'shadow',
+        countInBeats: 0,
+        cadence: 'off',
+        transpose: 'fixed',
+      },
+    );
+
+    const compiled = compileExercise(ex, rate, {
+      pianoDuringSing: true,
+      pad: true,
+      click: false,
+      beatClicks: false,
+    });
+
+    // 4 個示範音（1, 2, 3~5, 5，各有開始與結束）共 8 筆事件；空拍與 pad 皆不應出現
+    const melodyEvents = compiled.events.filter(
+      (e) => e.type === 'noteOn' || e.type === 'noteOff' || e.type === 'glide',
+    );
+    expect(melodyEvents).toHaveLength(8);
+    for (const ev of melodyEvents) {
+      if ('bus' in ev) {
+        expect(ev.bus).toBe('melody');
+      }
+    }
+  });
 });

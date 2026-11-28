@@ -21,7 +21,9 @@ export interface ExerciseOptions {
   countInBeats?: number;
   /** 每個調之間休息拍數，預設 1 */
   restBeats?: number;
-  mode?: 'follow' | 'listen-then-sing';
+  mode?: 'follow' | 'listen-then-sing' | 'shadow';
+  /** 影子練習空拍長度倍率（示範音長度 × 倍率），預設 1 */
+  shadowGapMultiplier?: 1 | 2;
   keyMode?: KeyMode;
   /** 自訂主音 MIDI 清單；非空時忽略 transpose，依此清單順序建立 KeyBlock */
   tonicList?: number[];
@@ -54,6 +56,10 @@ export interface NoteEvent {
   /** 第幾遍（0 起） */
   pass: number;
   phase: 'listen' | 'sing';
+  /** 影子模式空拍標記：true 表示此音符區間不發聲，僅供跟唱判斷與畫面顯示 */
+  silent?: boolean;
+  /** 是否強制由鋼琴彈出（MIDI 跟唱模式不受 pianoDuringSing=false 影響） */
+  alwaysPlay?: boolean;
 }
 
 export interface ChordEvent {
@@ -123,7 +129,9 @@ export function buildExercise(
     countInBeats = 4,
     restBeats = 1,
     mode = 'follow',
+    shadowGapMultiplier: rawShadowMult,
   } = opts;
+  const shadowGapMultiplier: 1 | 2 = rawShadowMult === 2 ? 2 : 1;
 
   if (!Number.isFinite(bpm) || bpm < 30 || bpm > 300) {
     throw new Error('速度（BPM）必須介於 30 至 300 之間');
@@ -189,7 +197,15 @@ export function buildExercise(
   tCursor += countInBeats * beatSec;
 
   const totalPatternBeats = parsed.events.reduce((sum, e) => sum + e.beats, 0);
-  const passDur = totalPatternBeats * noteBeats * beatSec;
+  const shadowPatternBeats = parsed.events.reduce(
+    (sum, e) =>
+      sum + e.beats * (e.semitone !== null ? 1 + shadowGapMultiplier : 1),
+    0,
+  );
+  const passDur =
+    (mode === 'shadow' ? shadowPatternBeats : totalPatternBeats) *
+    noteBeats *
+    beatSec;
   const isStaccato = articulation === 'staccato' || parsed.staccato;
   const displayTranspose =
     typeof opts.displayTranspose === 'number' &&
@@ -277,8 +293,12 @@ export function buildExercise(
     const notesStart = tCursor;
 
     const emitPass = (pass: number, phase: 'listen' | 'sing') => {
-      // 有換調引導和弦（cadence !== 'off'）時，唱的中間不再產生 pad 墊底和弦
-      if (cadenceMode === 'off' && chordRomans.length > 0) {
+      // 影子模式一律不彈和弦墊底；有換調引導和弦（cadence !== 'off'）時，唱的中間也不再產生 pad 墊底和弦
+      if (
+        mode !== 'shadow' &&
+        cadenceMode === 'off' &&
+        chordRomans.length > 0
+      ) {
         const chordDur = passDur / chordRomans.length;
         for (let ci = 0; ci < chordRomans.length; ci++) {
           const roman = chordRomans[ci]!;
@@ -306,6 +326,33 @@ export function buildExercise(
             nextEv && nextEv.semitone !== null
               ? tonicMidi + nextEv.semitone
               : undefined;
+          if (mode === 'shadow') {
+            // 影子練習：先播示範音，再接一個不發聲的空拍供使用者唱
+            notes.push({
+              start: noteCursor,
+              dur,
+              midi,
+              ...(endMidi !== undefined ? { endMidi } : {}),
+              keyIndex,
+              pass,
+              phase: 'listen',
+            });
+            noteCursor += evDur;
+
+            const gapDur = evDur * shadowGapMultiplier;
+            notes.push({
+              start: noteCursor,
+              dur: gapDur,
+              midi,
+              ...(endMidi !== undefined ? { endMidi } : {}),
+              keyIndex,
+              pass,
+              phase: 'sing',
+              silent: true,
+            });
+            noteCursor += gapDur;
+            continue;
+          }
           notes.push({
             start: noteCursor,
             dur,

@@ -55,6 +55,7 @@ const TRANSPOSE_OPTIONS: { value: TransposeOption; label: string }[] = [
 const MODE_OPTIONS: { value: PracticeModeOption; label: string }[] = [
   { value: 'follow', label: '跟唱' },
   { value: 'listen-then-sing', label: '先聽再唱' },
+  { value: 'shadow', label: '影子' },
 ];
 
 const CADENCE_OPTIONS: { value: CadenceMode; label: string }[] = [

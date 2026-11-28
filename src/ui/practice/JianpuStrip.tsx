@@ -5,6 +5,10 @@ import {
 } from '../../core/jianpu';
 import type { Key } from '../../core/key';
 import { tonicLabel, type NoteGlyph } from './layout';
+import type {
+  MidiJianpuMarker,
+  MidiJianpuUnderlineSegment,
+} from './midiLayout';
 
 interface JianpuStripProps {
   glyphs: NoteGlyph[];
@@ -22,6 +26,12 @@ interface JianpuStripProps {
   /** 八度位移小標籤（例：「8va」、「15ma」、「8vb」） */
   octaveTag?: string | null;
   height?: number;
+  /** MIDI 延長拍「–」與多拍休止「0」對齊標記 */
+  extraMarkers?: readonly MidiJianpuMarker[];
+  /** MIDI 同一拍相連減時線段（8 分 1 條、16 分 2 條） */
+  underlineSegments?: readonly MidiJianpuUnderlineSegment[];
+  /** 相鄰音符最小水平間距（px），決定 MIDI 簡譜字級與是否隱藏唱名 */
+  minNoteSpacingPx?: number;
 }
 
 /** 簡譜帶：每個數字水平對齊下方五線譜音符的 x 座標 */
@@ -38,7 +48,19 @@ export function JianpuStrip({
   lineLabel,
   octaveTag,
   height,
+  extraMarkers,
+  underlineSegments,
+  minNoteSpacingPx,
 }: JianpuStripProps) {
+  const isMidi = Boolean(underlineSegments !== undefined || extraMarkers !== undefined);
+  const safeSpacing = minNoteSpacingPx ?? 40;
+  const midiDigitPx = isMidi
+    ? Math.min(isTablet ? 24 : 16, Math.max(12, Math.floor(safeSpacing * 0.68)))
+    : undefined;
+  const midiAccPx =
+    midiDigitPx !== undefined ? Math.max(9, Math.round(midiDigitPx * 0.62)) : undefined;
+  const showSolfege = isTablet && (!isMidi || safeSpacing >= 38);
+
   const modeLabel =
     lineLabel !== undefined
       ? lineLabel
@@ -48,7 +70,7 @@ export function JianpuStrip({
 
   return (
     <div
-      className={`jianpu-strip ${isTablet ? 'is-tablet' : isPortrait ? 'is-portrait' : ''}`}
+      className={`jianpu-strip ${isTablet ? 'is-tablet' : isPortrait ? 'is-portrait' : ''} ${isMidi ? 'is-midi' : ''}`}
       style={height !== undefined ? { height: `${height}px` } : undefined}
     >
       {((modeLabel !== null && modeLabel !== '') || octaveTag) && (
@@ -69,9 +91,15 @@ export function JianpuStrip({
       )}
 
       {glyphs.map((g, idx) => {
-        const jp = toJianpu(g.midi, activeKey, jianpuMode, tonicMidi);
-        const upDots = jp.octave > 0 ? jp.octave : 0;
-        const downDots = jp.octave < 0 ? Math.abs(jp.octave) : 0;
+        const isRest = Boolean(g.isRest);
+        const isDash = g.jianpuSymbol === '–';
+        const jp =
+          isRest || isDash
+            ? null
+            : toJianpu(g.midi, activeKey, jianpuMode, tonicMidi);
+        const upDots = jp && jp.octave > 0 ? jp.octave : 0;
+        const downDots = jp && jp.octave < 0 ? Math.abs(jp.octave) : 0;
+        const underlines = g.jianpuUnderlines ?? 0;
 
         let statusClass = 'is-future';
         if (idx === activeIndex) {
@@ -83,17 +111,20 @@ export function JianpuStrip({
           statusClass = 'is-past';
         }
 
-        const solfege = isTablet
-          ? solfegeName(g.midi, activeKey, jianpuMode)
-          : '';
+        const solfege =
+          showSolfege && !isRest && !isDash
+            ? solfegeName(g.midi, activeKey, jianpuMode)
+            : '';
+
+        const digitText = isRest ? '0' : isDash ? '–' : jp!.digit;
 
         return (
           <div
             key={`${g.start}-${idx}`}
-            className={`jianpu-strip-item ${statusClass}`}
+            className={`jianpu-strip-item ${statusClass} ${g.silent ? 'is-shadow-gap' : ''} ${isRest ? 'is-rest' : ''}`}
             style={{ left: `${g.x}px` }}
           >
-            {isTablet && solfege && (
+            {solfege && (
               <span className="jianpu-strip-solfege">{solfege}</span>
             )}
             <span className="jianpu-strip-note">
@@ -106,11 +137,51 @@ export function JianpuStrip({
                 </span>
               )}
               <span className="jianpu-strip-core">
-                {jp.accidental && (
-                  <span className="jianpu-strip-acc">{jp.accidental}</span>
+                {jp?.accidental && (
+                  <span
+                    className="jianpu-strip-acc"
+                    style={
+                      midiAccPx !== undefined
+                        ? { fontSize: `${midiAccPx}px` }
+                        : undefined
+                    }
+                  >
+                    {jp.accidental}
+                  </span>
                 )}
-                <span className="jianpu-strip-digit">{jp.digit}</span>
+                <span
+                  className="jianpu-strip-digit"
+                  style={
+                    midiDigitPx !== undefined
+                      ? { fontSize: `${midiDigitPx}px` }
+                      : undefined
+                  }
+                >
+                  {digitText}
+                </span>
+                {g.jianpuDot && (
+                  <span
+                    className="jianpu-strip-aug-dot"
+                    style={
+                      midiDigitPx !== undefined
+                        ? { fontSize: `${Math.round(midiDigitPx * 0.78)}px` }
+                        : undefined
+                    }
+                    aria-hidden="true"
+                  >
+                    ·
+                  </span>
+                )}
               </span>
+              {!underlineSegments && underlines > 0 && (
+                <span
+                  className={`jianpu-strip-underlines has-${underlines}`}
+                  aria-hidden="true"
+                >
+                  <span className="jianpu-underline" />
+                  {underlines >= 2 && <span className="jianpu-underline" />}
+                </span>
+              )}
               {downDots > 0 && (
                 <span
                   className="jianpu-strip-dots is-down"
@@ -123,6 +194,41 @@ export function JianpuStrip({
           </div>
         );
       })}
+
+      {underlineSegments?.map((seg, idx) => (
+        <span
+          key={`ul-${idx}`}
+          className={`jianpu-connected-underline is-level-${seg.level} ${sec >= seg.endSec ? 'is-past' : ''}`}
+          style={{
+            left: `${seg.x1}px`,
+            width: `${Math.max(6, seg.x2 - seg.x1)}px`,
+          }}
+          aria-hidden="true"
+        />
+      ))}
+
+      {extraMarkers?.map((m, idx) => (
+        <div
+          key={`extra-${m.t}-${idx}`}
+          className={`jianpu-strip-item ${sec >= m.t ? 'is-past' : 'is-future'} jianpu-strip-ext`}
+          style={{ left: `${m.x}px` }}
+        >
+          <span className="jianpu-strip-note">
+            <span className="jianpu-strip-core">
+              <span
+                className="jianpu-strip-digit"
+                style={
+                  midiDigitPx !== undefined
+                    ? { fontSize: `${midiDigitPx}px` }
+                    : undefined
+                }
+              >
+                {m.symbol}
+              </span>
+            </span>
+          </span>
+        </div>
+      ))}
     </div>
   );
 }

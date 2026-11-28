@@ -4,6 +4,9 @@ import { A4_DEFAULT, midiToHz } from '../core/notes';
 import type { GainBus } from './dsp/mixer';
 import {
   compileExercise,
+  SCHED_CHUNK_SIZE,
+  SCHED_LOOKAHEAD_SEC,
+  takeNextEventBatch,
   type CompileOptions,
   type SchedEvent,
 } from './dsp/schedule';
@@ -36,6 +39,9 @@ export class AudioEngine {
   private exercise: Exercise | null = null;
   private compileOpts: CompileOptions = {};
   private lastCompiledEvents: readonly SchedEvent[] = [];
+  private sentEventCursor = 0;
+  private sentLastFrame = 0;
+  private streamGeneration = 0;
   private audioSessionType: 'playback' | 'play-and-record' = 'playback';
   private _ctxToSongOffsetSec: number | null = null;
   private readonly gains: Partial<Record<GainBus, number>> = {};
@@ -94,6 +100,7 @@ export class AudioEngine {
       node.port.onmessage = (ev: MessageEvent<WorkletOutMessage>) => {
         const msg = ev.data;
         if (msg.type === 'pos') {
+          this.pumpEventsAhead(msg.frame);
           const sec = msg.frame / ctx.sampleRate;
           const ctxSec =
             msg.ctxFrame !== undefined
@@ -171,6 +178,57 @@ export class AudioEngine {
     }
   }
 
+  private pumpEventsAhead(targetFrame: number, maxBatches = 2): void {
+    if (!this.ctx || !this.node) {
+      return;
+    }
+    const lookaheadFrame =
+      targetFrame + Math.round(SCHED_LOOKAHEAD_SEC * this.ctx.sampleRate);
+    let sent = 0;
+    while (
+      this.sentEventCursor < this.lastCompiledEvents.length &&
+      this.sentLastFrame < lookaheadFrame &&
+      sent < maxBatches
+    ) {
+      const slice = takeNextEventBatch(
+        this.lastCompiledEvents,
+        this.sentEventCursor,
+        SCHED_CHUNK_SIZE,
+      );
+      if (slice.batch.length === 0) {
+        break;
+      }
+      this.sentEventCursor = slice.nextCursor;
+      this.sentLastFrame = slice.lastFrame;
+      this.post({
+        type: 'append',
+        events: slice.batch,
+        generation: this.streamGeneration,
+      });
+      sent++;
+    }
+  }
+
+  private sendEventStream(
+    events: readonly SchedEvent[],
+    totalFrames: number,
+  ): void {
+    this.lastCompiledEvents = events;
+    this.streamGeneration += 1;
+    const first = takeNextEventBatch(events, 0, SCHED_CHUNK_SIZE);
+    this.sentEventCursor = first.nextCursor;
+    this.sentLastFrame = first.lastFrame;
+    this.post({
+      type: 'load',
+      events: first.batch,
+      totalFrames,
+      generation: this.streamGeneration,
+    });
+    if (this.ctx) {
+      this.pumpEventsAhead(0, 2);
+    }
+  }
+
   private sendCompiledExercise(): void {
     if (!this.exercise || !this.ctx || !this.node) {
       return;
@@ -179,19 +237,25 @@ export class AudioEngine {
       ...this.compileOpts,
       a4: this.a4,
     });
-    this.lastCompiledEvents = compiled.events;
-    this.post({
-      type: 'load',
-      events: compiled.events,
-      totalFrames: compiled.totalFrames,
-    });
+    this.sendEventStream(compiled.events, compiled.totalFrames);
   }
 
-  /** 載入練習時間表並編譯送入 worklet */
+  /** 載入練習時間表並編譯分批送入 worklet */
   load(ex: Exercise, opts: CompileOptions = {}): void {
     this.exercise = ex;
     this.compileOpts = opts;
     this.sendCompiledExercise();
+  }
+
+  /** 直接載入已編譯排程事件表（供單軌試聽等短片段使用，同樣分批傳送） */
+  loadEvents(events: readonly SchedEvent[], totalFrames: number): void {
+    this.exercise = null;
+    this.compileOpts = {};
+    if (!this.ctx || !this.node) {
+      this.lastCompiledEvents = events;
+      return;
+    }
+    this.sendEventStream(events, totalFrames);
   }
 
   play(): void {
@@ -211,12 +275,13 @@ export class AudioEngine {
     this.post({ type: 'stop' });
   }
 
-  /** 跳轉至指定秒數 */
+  /** 跳轉至指定秒數（若跳轉處尚未送入 worklet 則補齊至預讀區間） */
   seek(sec: number): void {
     if (!this.ctx) {
       return;
     }
     const frame = Math.max(0, Math.round(sec * this.ctx.sampleRate));
+    this.pumpEventsAhead(frame, Number.POSITIVE_INFINITY);
     this.post({ type: 'seek', frame });
   }
 

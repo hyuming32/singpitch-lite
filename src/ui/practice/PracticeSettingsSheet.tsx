@@ -283,6 +283,30 @@ export function PracticeSettingsSheet({
             </div>
           </div>
 
+          {/* 1.5 影子空拍長度 */}
+          <div className="setting-row">
+            <span className="setting-label">影子空拍長度</span>
+            <div className="segmented-group">
+              {(
+                [
+                  { value: 1, label: '1 倍' },
+                  { value: 2, label: '2 倍' },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  className={`seg-btn ${settings.shadowGapMultiplier === opt.value ? 'is-active' : ''}`}
+                  onClick={() =>
+                    onUpdateSettings({ shadowGapMultiplier: opt.value })
+                  }
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* 2. 收音模式 */}
           <div className="setting-row">
             <span className="setting-label">收音</span>

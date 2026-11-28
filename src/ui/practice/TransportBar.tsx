@@ -47,6 +47,9 @@ interface TransportBarProps {
   onBpmEditingChange?: (editing: boolean) => void;
   onTransposeStep: (delta: -1 | 1) => void;
   onTogglePiano: () => void;
+  showMixerButton?: boolean;
+  mixerOpen?: boolean;
+  onToggleMixer?: () => void;
 }
 
 /** 格式化移調半音數：0 → "0"、正數加 "+"、負數加 "−" */
@@ -137,6 +140,9 @@ export function TransportBar({
   onBpmEditingChange,
   onTransposeStep,
   onTogglePiano,
+  showMixerButton = false,
+  mixerOpen = false,
+  onToggleMixer,
 }: TransportBarProps) {
   const [showTransposeTip, setShowTransposeTip] = useState(false);
   const [showPianoHint, setShowPianoHint] = useState(() => !readPianoHintSeen());
@@ -443,6 +449,19 @@ export function TransportBar({
           ＋
         </button>
       </div>
+
+      {/* 混音鈕（僅 MIDI 模式顯示） */}
+      {showMixerButton && onToggleMixer && (
+        <button
+          type="button"
+          className={`tb-btn tb-mixer-btn ${mixerOpen ? 'is-active' : ''}`}
+          aria-label="混音"
+          aria-expanded={mixerOpen}
+          onClick={onToggleMixer}
+        >
+          混音
+        </button>
+      )}
 
       {/* 鋼琴指示燈開關 */}
       <div className="tb-piano-wrap">

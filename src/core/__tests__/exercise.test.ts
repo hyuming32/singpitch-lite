@@ -564,4 +564,129 @@ describe('exercise', () => {
       2 * 2 * chordCountPerPass,
     );
   });
+
+  it('影子模式：1 2 3 2 1 交錯示範與空拍、倍率 1 與 2、休止符、跳音、滑音、換調與無 pad', () => {
+    const fiveNotePattern = { jianpu: '1 2 3 2 1', chords: 'I V I' };
+    const ex1 = buildExercise(fiveNotePattern, {
+      startTonic: 60,
+      low: 48,
+      high: 79,
+      bpm: 60,
+      noteBeats: 1,
+      mode: 'shadow',
+      shadowGapMultiplier: 1,
+      countInBeats: 0,
+      cadence: 'off',
+      transpose: 'fixed',
+    });
+
+    expect(ex1.notes).toHaveLength(10);
+    expect(ex1.notes.map((n) => n.start)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    for (let i = 0; i < 10; i++) {
+      const n = ex1.notes[i]!;
+      expect(n.dur).toBeCloseTo(1, 6);
+      if (i % 2 === 0) {
+        expect(n.phase).toBe('listen');
+        expect(n.silent).toBeUndefined();
+      } else {
+        expect(n.phase).toBe('sing');
+        expect(n.silent).toBe(true);
+        expect(n.midi).toBe(ex1.notes[i - 1]!.midi);
+      }
+    }
+    // 影子模式一律不產生 pad 和弦
+    expect(ex1.chords.filter((c) => c.role === 'pad')).toHaveLength(0);
+
+    // 倍率 2：空拍長度 2 拍，後續時間正確
+    const ex2 = buildExercise(fiveNotePattern, {
+      startTonic: 60,
+      low: 48,
+      high: 79,
+      bpm: 60,
+      noteBeats: 1,
+      mode: 'shadow',
+      shadowGapMultiplier: 2,
+      countInBeats: 0,
+      cadence: 'off',
+      transpose: 'fixed',
+    });
+    expect(ex2.notes.map((n) => n.start)).toEqual([0, 1, 3, 4, 6, 7, 9, 10, 12, 13]);
+    expect(ex2.notes[1]!.dur).toBeCloseTo(2, 6);
+    expect(ex2.total).toBeCloseTo(15, 6);
+
+    // 休止符照原長保留、不產生空拍
+    const withRest = buildExercise(
+      { jianpu: '1 0 3', chords: 'I' },
+      {
+        startTonic: 60,
+        low: 48,
+        high: 79,
+        bpm: 60,
+        mode: 'shadow',
+        countInBeats: 0,
+        cadence: 'off',
+        transpose: 'fixed',
+      },
+    );
+    expect(withRest.notes).toHaveLength(4);
+    expect(withRest.notes.map((n) => n.start)).toEqual([0, 1, 3, 4]);
+
+    // 跳音：示範音為 0.5 倍長，空拍仍為完整長度
+    const stac = buildExercise(
+      { jianpu: '1 2', chords: 'I' },
+      {
+        startTonic: 60,
+        low: 48,
+        high: 79,
+        bpm: 60,
+        mode: 'shadow',
+        articulation: 'staccato',
+        shadowGapMultiplier: 1,
+        countInBeats: 0,
+        cadence: 'off',
+        transpose: 'fixed',
+      },
+    );
+    expect(stac.notes[0]!.dur).toBeCloseTo(0.5, 6);
+    expect(stac.notes[1]!.dur).toBeCloseTo(1, 6);
+    expect(stac.notes[2]!.start).toBeCloseTo(2, 6);
+
+    // 滑音：示範與空拍皆帶 endMidi
+    const glide = buildExercise(
+      { jianpu: '1~5', chords: 'I' },
+      {
+        startTonic: 60,
+        low: 48,
+        high: 79,
+        bpm: 60,
+        mode: 'shadow',
+        countInBeats: 0,
+        cadence: 'off',
+        transpose: 'fixed',
+      },
+    );
+    expect(glide.notes[0]!.endMidi).toBe(67);
+    expect(glide.notes[1]!.silent).toBe(true);
+    expect(glide.notes[1]!.endMidi).toBe(67);
+
+    // 換調時 KeyBlock 與提示和弦位置正確
+    const keyed = buildExercise(fiveNotePattern, {
+      startTonic: 60,
+      low: 48,
+      high: 79,
+      bpm: 60,
+      mode: 'shadow',
+      cadence: 'leading',
+      countInBeats: 0,
+      restBeats: 1,
+      tonicList: [60, 62],
+    });
+    expect(keyed.keys).toHaveLength(2);
+    expect(keyed.keys[0]!.start).toBeCloseTo(0, 6);
+    expect(keyed.keys[0]!.notesStart).toBeCloseTo(3, 6);
+    expect(keyed.keys[0]!.end).toBeCloseTo(13, 6);
+    expect(keyed.keys[1]!.start).toBeCloseTo(14, 6);
+    expect(keyed.keys[1]!.notesStart).toBeCloseTo(18, 6);
+    expect(keyed.chords.every((c) => c.role === 'cadence')).toBe(true);
+  });
 });

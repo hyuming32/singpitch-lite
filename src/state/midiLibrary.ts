@@ -24,6 +24,26 @@ export interface MidiStore {
   delete(id: string): Promise<void>;
 }
 
+export type MidiTrackRole = 'vocal' | 'accompaniment' | 'rhythm' | 'mute';
+
+export interface MidiMixerSettings {
+  vocalEnabled: boolean;
+  vocalVolume: number;
+  accompEnabled: boolean;
+  accompVolume: number;
+  rhythmEnabled: boolean;
+  rhythmVolume: number;
+}
+
+export const DEFAULT_MIDI_MIXER: MidiMixerSettings = {
+  vocalEnabled: true,
+  vocalVolume: 80,
+  accompEnabled: true,
+  accompVolume: 60,
+  rhythmEnabled: true,
+  rhythmVolume: 50,
+};
+
 export interface MidiSongSettings {
   trackIndex: number;
   startBar: number;
@@ -31,6 +51,10 @@ export interface MidiSongSettings {
   transposeSemitones: number;
   speedPercent: number;
   manualKey: Key | null;
+  /** 各軌分軌角色（以軌道 index 為鍵；未設定代表舊資料，使用自動預分） */
+  trackRoles?: Record<number, MidiTrackRole>;
+  /** 混音器三組開關與音量（0–100） */
+  mixer?: MidiMixerSettings;
 }
 
 /** 計算位元組陣列的 FNV-1a 32 位元十六進位雜湊值 */
@@ -219,6 +243,99 @@ function sanitizeKey(raw: unknown): Key | null {
   return { tonicPc: obj.tonicPc, mode };
 }
 
+function isValidTrackRole(val: unknown): val is MidiTrackRole {
+  return (
+    val === 'vocal' ||
+    val === 'accompaniment' ||
+    val === 'rhythm' ||
+    val === 'mute'
+  );
+}
+
+function sanitizeTrackRoles(
+  raw: unknown,
+  preferredVocalIndex: number,
+): Record<number, MidiTrackRole> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return undefined;
+  }
+  const obj = raw as Record<string, unknown>;
+  const out: Record<number, MidiTrackRole> = {};
+  let hasAny = false;
+  const vocalKeys: number[] = [];
+
+  for (const [k, v] of Object.entries(obj)) {
+    const idx = Number(k);
+    if (!Number.isInteger(idx) || idx < 0 || !isValidTrackRole(v)) {
+      continue;
+    }
+    out[idx] = v;
+    hasAny = true;
+    if (v === 'vocal') {
+      vocalKeys.push(idx);
+    }
+  }
+
+  if (!hasAny) {
+    return undefined;
+  }
+
+  // 確保主唱最多只有一軌（優先保留與 trackIndex 相符者）
+  if (vocalKeys.length > 1) {
+    const keep = vocalKeys.includes(preferredVocalIndex)
+      ? preferredVocalIndex
+      : vocalKeys[0]!;
+    for (const k of vocalKeys) {
+      if (k !== keep) {
+        out[k] = 'accompaniment';
+      }
+    }
+  }
+
+  return out;
+}
+
+function clampVolume(value: unknown, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return fallback;
+  }
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function sanitizeMidiMixer(raw: unknown): MidiMixerSettings | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return undefined;
+  }
+  const obj = raw as Record<string, unknown>;
+  return {
+    vocalEnabled:
+      typeof obj.vocalEnabled === 'boolean'
+        ? obj.vocalEnabled
+        : DEFAULT_MIDI_MIXER.vocalEnabled,
+    vocalVolume: clampVolume(obj.vocalVolume, DEFAULT_MIDI_MIXER.vocalVolume),
+    accompEnabled:
+      typeof obj.accompEnabled === 'boolean'
+        ? obj.accompEnabled
+        : DEFAULT_MIDI_MIXER.accompEnabled,
+    accompVolume: clampVolume(obj.accompVolume, DEFAULT_MIDI_MIXER.accompVolume),
+    rhythmEnabled:
+      typeof obj.rhythmEnabled === 'boolean'
+        ? obj.rhythmEnabled
+        : DEFAULT_MIDI_MIXER.rhythmEnabled,
+    rhythmVolume: clampVolume(obj.rhythmVolume, DEFAULT_MIDI_MIXER.rhythmVolume),
+  };
+}
+
+/** 取得正規化後的混音器設定（舊資料無 mixer 欄位時回傳預設值） */
+export function resolveMidiMixer(
+  settings?: Pick<MidiSongSettings, 'mixer'> | null,
+): MidiMixerSettings {
+  if (!settings?.mixer) {
+    return { ...DEFAULT_MIDI_MIXER };
+  }
+  return { ...settings.mixer };
+}
+
 /** 驗證並正規化單首 MIDI 設定 */
 export function sanitizeMidiSongSettings(raw: unknown): MidiSongSettings | null {
   if (!raw || typeof raw !== 'object') {
@@ -247,14 +364,19 @@ export function sanitizeMidiSongSettings(raw: unknown): MidiSongSettings | null 
     typeof obj.speedPercent === 'number' && Number.isFinite(obj.speedPercent)
       ? Math.round(obj.speedPercent / 5) * 5
       : 100;
+  const trackIndex = Math.max(0, Math.round(obj.trackIndex));
+  const trackRoles = sanitizeTrackRoles(obj.trackRoles, trackIndex);
+  const mixer = sanitizeMidiMixer(obj.mixer);
 
   return {
-    trackIndex: Math.max(0, Math.round(obj.trackIndex)),
+    trackIndex,
     startBar,
     endBar,
     transposeSemitones: Math.max(-12, Math.min(12, transposeRaw)),
     speedPercent: Math.max(50, Math.min(150, speedRaw)),
     manualKey: sanitizeKey(obj.manualKey),
+    ...(trackRoles ? { trackRoles } : {}),
+    ...(mixer ? { mixer } : {}),
   };
 }
 

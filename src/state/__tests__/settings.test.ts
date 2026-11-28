@@ -180,6 +180,7 @@ describe('toExerciseOptions 與摘要', () => {
       cadence: 'off',
       countInBeats: 0,
       mode: 'follow',
+      shadowGapMultiplier: 1,
     });
 
     // repeatsPerKey 統一映射到 ExerciseOptions.repeats（'inf' 時建立 1 遍）
@@ -256,6 +257,18 @@ describe('每調重複次數循環與舊設定相容', () => {
     const loadedListen = loadSettings(savedListenStorage);
     expect(loadedListen.mode).toBe('listen-then-sing');
     expect(loadedListen.repeatsPerKey).toBe(2);
+    expect(loadedListen.shadowGapMultiplier).toBe(1);
+
+    // 影子模式與空拍倍率 2 存取，以及舊資料補齊預設倍率 1
+    const shadowStorage = createMemoryStorage({
+      [SETTINGS_STORAGE_KEY]: JSON.stringify({
+        mode: 'shadow',
+        shadowGapMultiplier: 2,
+      }),
+    });
+    const loadedShadow = loadSettings(shadowStorage);
+    expect(loadedShadow.mode).toBe('shadow');
+    expect(loadedShadow.shadowGapMultiplier).toBe(2);
   });
 });
 
